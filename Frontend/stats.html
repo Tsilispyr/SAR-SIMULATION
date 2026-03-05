@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAR Mission Stats</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap"
+        rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --bg: #96adc0;
+            --surface: #9fabc5;
+            --surface2: #809ea5;
+            --border: #6f88bd;
+            --accent: #052369;
+            --green: #19a725;
+            --yellow: #d3bf0d;
+            --red: #b60909;
+            --purple: #801ddd;
+            --text: #163f0c;
+            --muted: #014404;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Share Tech Mono', monospace;
+            min-height: 100vh;
+        }
+
+        /* ── TOP BAR ── */
+        header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 20px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            flex-wrap: wrap;
+        }
+
+        header h1 {
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--accent);
+            font-family: 'Orbitron', sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        #header-elapsed {
+            font-size: 22px;
+            font-weight: 900;
+            color: var(--text);
+            font-variant-numeric: tabular-nums;
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        #mission-banner {
+            font-size: 11px;
+            font-weight: 600;
+            padding: 4px 14px;
+            border-radius: 20px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            color: var(--muted);
+            transition: .3s;
+            font-family: 'Orbitron', sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+        }
+
+        #mission-banner.active {
+            border-color: var(--green);
+            color: var(--green);
+        }
+
+        #mission-banner.success {
+            border-color: var(--green);
+            color: var(--green);
+        }
+
+        #mission-banner.partial {
+            border-color: var(--yellow);
+            color: var(--yellow);
+        }
+
+        #mission-banner.failed {
+            border-color: var(--red);
+            color: var(--red);
+        }
+
+        .hdr-link {
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, .06);
+            color: var(--text);
+            text-decoration: none;
+            margin-left: auto;
+        }
+
+        .hdr-link:hover {
+            background: rgba(255, 255, 255, .12);
+        }
+
+        /* ── MINI-MAP ── */
+        #mini-map-wrap {
+            position: fixed;
+            top: 56px;
+            right: 14px;
+            width: 280px;
+            height: 200px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+            z-index: 500;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, .4);
+        }
+
+        #mini-map {
+            width: 100%;
+            height: 100%;
+        }
+
+        #mini-map-label {
+            position: absolute;
+            top: 6px;
+            left: 8px;
+            font-size: 9px;
+            font-family: 'Orbitron', sans-serif;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: #fff;
+            background: rgba(0, 0, 0, .5);
+            padding: 2px 6px;
+            border-radius: 4px;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        /* ── KPI STRIP ── */
+        #kpi-row {
+            display: flex;
+            gap: 12px;
+            padding: 14px 20px;
+            overflow-x: auto;
+            border-bottom: 1px solid var(--border);
+            background: var(--surface);
+            flex-shrink: 0;
+        }
+
+        .kpi-card {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px 16px;
+            flex: 0 0 auto;
+            min-width: 120px;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            transition: border-color .3s;
+        }
+
+        .kpi-card:hover {
+            border-color: var(--accent);
+        }
+
+        .kpi-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--muted);
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        .kpi-value {
+            font-size: 26px;
+            font-weight: 900;
+            color: var(--text);
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        .kpi-value.good {
+            color: var(--green);
+        }
+
+        .kpi-value.warn {
+            color: var(--yellow);
+        }
+
+        .kpi-value.danger {
+            color: var(--red);
+        }
+
+        .kpi-value.accent {
+            color: var(--accent);
+        }
+
+        .kpi-sub {
+            font-size: 10px;
+            color: var(--muted);
+        }
+
+        /* ── RESULT BANNER ── */
+        #result-banner {
+            display: none;
+            text-align: center;
+            font-size: 18px;
+            font-weight: 900;
+            padding: 16px 24px;
+            border-radius: 10px;
+            border: 2px solid;
+            margin: 14px 20px 0;
+            animation: pulse 2s infinite;
+            letter-spacing: 2px;
+            font-family: 'Orbitron', sans-serif;
+            text-transform: uppercase;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: .7;
+            }
+        }
+
+        #result-banner.success {
+            background: rgba(34, 197, 94, .15);
+            color: var(--green);
+            border-color: var(--green);
+        }
+
+        #result-banner.partial {
+            background: rgba(245, 158, 11, .15);
+            color: var(--yellow);
+            border-color: var(--yellow);
+        }
+
+        #result-banner.failed {
+            background: rgba(239, 68, 68, .15);
+            color: var(--red);
+            border-color: var(--red);
+        }
+
+        /* ── 3-COLUMN EQUAL GRID ── */
+        #panels {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 14px;
+            padding: 14px 20px;
+            /* Scroll the whole page naturally — no fixed height */
+        }
+
+        .panel-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 14px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-width: 0;
+            /* allow grid to shrink */
+            min-height: 340px;
+        }
+
+        .panel-card h3 {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: .8px;
+            flex-shrink: 0;
+        }
+
+        /* Charts fill their panel */
+        .chart-wrap {
+            flex: 1;
+            min-height: 0;
+            position: relative;
+        }
+
+        .chart-wrap canvas {
+            position: absolute;
+            inset: 0;
+        }
+
+        /* Log card */
+        /* #log-card {} */
+
+        #log-list {
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            max-height: 380px;
+            /* scrolls after this height */
+        }
+
+        #log-list::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        #log-list::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 2px;
+        }
+
+        .log-entry {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 5px;
+            padding: 7px 9px;
+            font-size: 11px;
+            line-height: 1.4;
+            color: var(--text);
+            flex-shrink: 0;
+        }
+
+        .log-entry .log-time {
+            color: var(--muted);
+            font-size: 10px;
+            margin-bottom: 2px;
+        }
+
+        .log-entry.escape {
+            border-left: 3px solid var(--red);
+        }
+
+        .log-entry.brave {
+            border-left: 3px solid var(--yellow);
+        }
+
+        .log-entry.normal {
+            border-left: 3px solid var(--accent);
+        }
+
+        /* refresh badge */
+        #refresh-badge {
+            position: fixed;
+            bottom: 14px;
+            right: 14px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            color: var(--muted);
+            font-size: 10px;
+            padding: 4px 10px;
+            border-radius: 20px;
+            z-index: 10;
+        }
+
+        /* ── HISTORY PANEL (full-width 4th card) ── */
+        #history-card {
+            grid-column: 1 / -1;
+        }
+
+        #history-inner {
+            display: grid;
+            grid-template-columns: 220px 1fr;
+            gap: 16px;
+            align-items: start;
+        }
+
+        #pie-wrap {
+            position: relative;
+            width: 200px;
+            height: 200px;
+            margin: 0 auto;
+        }
+
+        #history-stats {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .hs-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            border-bottom: 1px solid rgba(0, 0, 0, .12);
+            padding-bottom: 4px;
+        }
+
+        .hs-label {
+            color: var(--muted);
+        }
+
+        .hs-val {
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        .hs-val.c-green {
+            color: var(--green);
+        }
+
+        .hs-val.c-yellow {
+            color: var(--yellow);
+        }
+
+        .hs-val.c-red {
+            color: var(--red);
+        }
+
+        #recent-list {
+            margin-top: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            max-height: 160px;
+            overflow-y: auto;
+        }
+
+        .rec-entry {
+            font-size: 10px;
+            padding: 3px 7px;
+            border-radius: 4px;
+            border-left: 3px solid var(--border);
+            background: var(--surface2);
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .rec-entry.success {
+            border-color: var(--green);
+        }
+
+        .rec-entry.partial {
+            border-color: var(--yellow);
+        }
+
+        .rec-entry.failed {
+            border-color: var(--red);
+        }
+
+        /* Responsive: stack on small screens */
+        @media (max-width: 900px) {
+            #panels {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 1200px) and (min-width: 900px) {
+            #panels {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            #log-card {
+                grid-column: 1 / -1;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <h1>SAR Analytics</h1>
+        <span id="header-elapsed">00:00</span>
+        <span id="mission-banner">STANDBY</span>
+        <a href="mission.html" target="_blank" class="hdr-link">🗺 Mission View</a>
+    </header>
+
+    <div id="kpi-row">
+        <div class="kpi-card">
+            <span class="kpi-label">Score</span>
+            <span class="kpi-value accent" id="kpi-score">0</span>
+            <span class="kpi-sub">pts earned</span>
+        </div>
+        <div class="kpi-card">
+            <span class="kpi-label">Targets Left</span>
+            <span class="kpi-value warn" id="kpi-targets">-</span>
+            <span class="kpi-sub" id="kpi-targets-sub">of - total</span>
+        </div>
+        <div class="kpi-card">
+            <span class="kpi-label">Enemies</span>
+            <span class="kpi-value danger" id="kpi-enemies">-</span>
+            <span class="kpi-sub">active</span>
+        </div>
+        <div class="kpi-card">
+            <span class="kpi-label">AI Mode</span>
+            <span class="kpi-value good" id="kpi-mode" style="font-size:18px;">—</span>
+            <span class="kpi-sub">autopilot</span>
+        </div>
+        <div class="kpi-card">
+            <span class="kpi-label">Status</span>
+            <span class="kpi-value" id="kpi-status" style="font-size:13px;padding-top:6px;">Waiting...</span>
+            <span class="kpi-sub" id="kpi-status-sub"></span>
+        </div>
+    </div>
+
+    <div id="result-banner"></div>
+
+    <!-- Mini live-map -->
+    <div id="mini-map-wrap">
+        <div id="mini-map-label">Live View</div>
+        <div id="mini-map"></div>
+    </div>
+
+    <div id="panels">
+        <!-- Score chart -->
+        <div class="panel-card">
+            <h3>Score over Time</h3>
+            <div class="chart-wrap"><canvas id="chart-score"></canvas></div>
+        </div>
+
+        <!-- Targets chart -->
+        <div class="panel-card">
+            <h3>Targets Remaining over Time</h3>
+            <div class="chart-wrap"><canvas id="chart-targets"></canvas></div>
+        </div>
+
+        <!-- Decision log -->
+        <div class="panel-card" id="log-card">
+            <h3>AI Decision Log</h3>
+            <div id="log-list">
+                <div class="log-entry normal">
+                    <div class="log-time">—</div>
+                    Waiting for mission start...
+                </div>
+            </div>
+        </div>
+
+        <!-- Mission history -->
+        <div class="panel-card" id="history-card">
+            <h3>Mission History</h3>
+            <div id="history-inner">
+                <div id="pie-wrap">
+                    <canvas id="chart-history"></canvas>
+                </div>
+                <div id="history-stats">
+                    <div class="hs-row">
+                        <span class="hs-label">Total Missions</span>
+                        <span class="hs-val" id="hs-total">—</span>
+                    </div>
+                    <div class="hs-row">
+                        <span class="hs-label">Success</span>
+                        <span class="hs-val c-green" id="hs-success">—</span>
+                    </div>
+                    <div class="hs-row">
+                        <span class="hs-label">Partial</span>
+                        <span class="hs-val c-yellow" id="hs-partial">—</span>
+                    </div>
+                    <div class="hs-row">
+                        <span class="hs-label">Failed</span>
+                        <span class="hs-val c-red" id="hs-failed">—</span>
+                    </div>
+                    <div class="hs-row">
+                        <span class="hs-label">Best Score</span>
+                        <span class="hs-val" id="hs-best">—</span>
+                    </div>
+                    <div class="hs-row">
+                        <span class="hs-label">Avg Score</span>
+                        <span class="hs-val" id="hs-avg">—</span>
+                    </div>
+                    <h3 style="margin-top:10px;">Recent Missions</h3>
+                    <div id="recent-list"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="refresh-badge">⟳ live · 1s</div>
+
+    <script>
+        // ── Charts ──
+        const opts = {
+            responsive: true, maintainAspectRatio: false, animation: false,
+            plugins: { legend: { labels: { color: '#64748b', font: { size: 10 } } } },
+            scales: {
+                x: { ticks: { color: '#64748b', maxTicksLimit: 8 }, grid: { color: '#2e3248' } },
+                y: { ticks: { color: '#64748b' }, grid: { color: '#2e3248' }, beginAtZero: true }
+            }
+        };
+
+        const scoreChart = new Chart(document.getElementById('chart-score'), {
+            type: 'line',
+            data: {
+                labels: [], datasets: [{
+                    label: 'Score', data: [],
+                    borderColor: '#3d78ff', backgroundColor: 'rgba(61,120,255,.12)',
+                    tension: 0.4, pointRadius: 0, fill: true, borderWidth: 2
+                }]
+            },
+            options: opts
+        });
+
+        const targetsChart = new Chart(document.getElementById('chart-targets'), {
+            type: 'line',
+            data: {
+                labels: [], datasets: [{
+                    label: 'Targets Remaining', data: [],
+                    borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,.10)',
+                    tension: 0.4, pointRadius: 0, fill: true, borderWidth: 2
+                }]
+            },
+            options: opts
+        });
+
+        // ── State ──
+        let lastHistLen = 0;
+        let logEntries = [];
+        let lastDecision = '';
+        let missionDone = false;
+
+        function fmtTime(sec) {
+            let m = Math.floor(sec / 60), s = Math.floor(sec % 60);
+            return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        }
+
+        function addLogEntry(time, text) {
+            let type = 'normal';
+            if (text.toLowerCase().includes('escape')) type = 'escape';
+            else if (text.toLowerCase().includes('brave')) type = 'brave';
+            logEntries.unshift({ time, text, type });
+            if (logEntries.length > 60) logEntries.pop();
+            renderLog();
+        }
+
+        function renderLog() {
+            document.getElementById('log-list').innerHTML = logEntries.map(e => `
+            <div class="log-entry ${e.type}">
+                <div class="log-time">${e.time}</div>
+                ${e.text}
+            </div>`).join('');
+        }
+
+        function showResultBanner(status, score, elapsed) {
+            let b = document.getElementById('result-banner');
+            if (status.includes('SUCCESS') && !status.includes('PARTIAL')) {
+                b.className = 'success';
+                b.innerHTML = `MISSION SUCCESS &nbsp;|&nbsp; Score: <b>${score}</b> &nbsp;|&nbsp; Time: ${fmtTime(elapsed)}`;
+            } else if (status.includes('PARTIAL')) {
+                b.className = 'partial';
+                b.innerHTML = `PARTIAL SUCCESS &nbsp;|&nbsp; Score: <b>${score}</b> &nbsp;|&nbsp; Time: ${fmtTime(elapsed)}`;
+            } else {
+                b.className = 'failed';
+                b.innerHTML = `MISSION FAILED &nbsp;|&nbsp; Score: <b>${score}</b> &nbsp;|&nbsp; Time: ${fmtTime(elapsed)}`;
+            }
+            b.style.display = 'block';
+        }
+
+        async function poll() {
+            try {
+                let data = await (await fetch('http://127.0.0.1:8000/api/stats')).json();
+                let elapsed = data.elapsed || 0;
+
+                document.getElementById('header-elapsed').innerText = fmtTime(elapsed);
+
+                // Mission banner
+                let banner = document.getElementById('mission-banner');
+                banner.className = '';
+                if (data.game_over) {
+                    if (data.status.includes('SUCCESS') && !data.status.includes('PARTIAL')) { banner.className = 'success'; banner.innerText = 'SUCCESS'; }
+                    else if (data.status.includes('PARTIAL')) { banner.className = 'partial'; banner.innerText = 'PARTIAL'; }
+                    else { banner.className = 'failed'; banner.innerText = 'FAILED'; }
+                    if (!missionDone) { missionDone = true; showResultBanner(data.status, data.score, elapsed); }
+                } else if (elapsed > 0) {
+                    banner.className = 'active'; banner.innerText = 'ACTIVE';
+                    missionDone = false;
+                    document.getElementById('result-banner').style.display = 'none';
+                }
+
+                // KPIs
+                document.getElementById('kpi-score').innerText = data.score ?? 0;
+                document.getElementById('kpi-targets').innerText = data.targets_remaining ?? '-';
+                document.getElementById('kpi-targets-sub').innerText = `of ${data.targets_total ?? '-'} total`;
+                document.getElementById('kpi-enemies').innerText = data.enemies_count ?? '-';
+
+                let modeEl = document.getElementById('kpi-mode');
+                if (data.escape_mode) { modeEl.innerText = 'ESCAPE'; modeEl.className = 'kpi-value danger'; }
+                else { modeEl.innerText = 'PURSUE'; modeEl.className = 'kpi-value good'; }
+
+                document.getElementById('kpi-status').innerText = data.status || '—';
+                document.getElementById('kpi-status-sub').innerText = data.game_over ? 'Mission ended' : 'In progress';
+
+                // Decision log
+                if (data.last_decision && data.last_decision !== lastDecision) {
+                    lastDecision = data.last_decision;
+                    addLogEntry(fmtTime(elapsed), data.last_decision);
+                }
+
+                // Charts (only on new history)
+                if (data.history && data.history.length > lastHistLen) {
+                    lastHistLen = data.history.length;
+                    const MAX = 80;
+                    const step = Math.max(1, Math.floor(data.history.length / MAX));
+                    const sam = data.history.filter((_, i) => i % step === 0);
+                    scoreChart.data.labels = sam.map(p => fmtTime(p.t));
+                    scoreChart.data.datasets[0].data = sam.map(p => p.score);
+                    scoreChart.update();
+                    targetsChart.data.labels = sam.map(p => fmtTime(p.t));
+                    targetsChart.data.datasets[0].data = sam.map(p => p.targets);
+                    targetsChart.update();
+                }
+            } catch (e) { /* offline */ }
+        }
+
+        // ── Mini-map (Leaflet) ──
+        const miniMap = L.map('mini-map', { zoomControl: false, attributionControl: false })
+            .setView([38.900, 22.433], 15);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19, className: 'mm-tiles'
+        }).addTo(miniMap);
+        // Dark map style
+        const mmStyle = document.createElement('style');
+        mmStyle.textContent = '.mm-tiles{filter:brightness(0.5) invert(1) contrast(1.1) hue-rotate(190deg) saturate(0.7);}';
+        document.head.appendChild(mmStyle);
+
+        const mmRobotIcon = L.divIcon({
+            className: '',
+            html: `<div style="width:12px;height:12px;background:#3d78ff;border-radius:50%;border:2px solid #fff;box-shadow:0 0 6px #3d78ff;"></div>`,
+            iconSize: [12, 12], iconAnchor: [6, 6]
+        });
+        let mmRobot = null, mmEnemies = {}, mmTargets = {};
+
+        async function pollPosition() {
+            try {
+                const d = await (await fetch('http://127.0.0.1:8000/api/robot/position')).json();
+                if (d.lat && d.lon) {
+                    const pos = [d.lat, d.lon];
+                    if (!mmRobot) {
+                        mmRobot = L.marker(pos, { icon: mmRobotIcon }).addTo(miniMap);
+                        miniMap.setView(pos, 16);
+                    } else {
+                        mmRobot.setLatLng(pos);
+                        miniMap.panTo(pos, { animate: true, duration: 0.4 });
+                    }
+                }
+                // Enemies
+                if (d.enemies) {
+                    const seenIds = new Set(d.enemies.map(e => e.id));
+                    d.enemies.forEach(e => {
+                        const color = e.type === 'aggressive' ? '#ef4444' : '#a855f7';
+                        const pos = [e.lat, e.lon];
+                        if (!mmEnemies[e.id])
+                            mmEnemies[e.id] = L.circleMarker(pos, { color, fillColor: color, fillOpacity: 0.9, radius: 5, weight: 1.5 }).addTo(miniMap);
+                        else mmEnemies[e.id].setLatLng(pos).setStyle({ color, fillColor: color });
+                    });
+                    for (const id in mmEnemies) if (!seenIds.has(parseInt(id))) {
+                        miniMap.removeLayer(mmEnemies[id]); delete mmEnemies[id];
+                    }
+                }
+                // Targets
+                if (d.targets) {
+                    const seenTids = new Set(d.targets.map(t => t.id));
+                    d.targets.forEach(t => {
+                        if (!mmTargets[t.id])
+                            mmTargets[t.id] = L.circleMarker([t.lat, t.lon], { color: 'gold', fillColor: 'gold', fillOpacity: 0.9, radius: 5, weight: 1 }).addTo(miniMap);
+                    });
+                    for (const id in mmTargets) if (!seenTids.has(parseInt(id))) {
+                        miniMap.removeLayer(mmTargets[id]); delete mmTargets[id];
+                    }
+                }
+            } catch (e) { /* offline */ }
+        }
+
+        // ── Mission History Pie Chart ──
+        const pieChart = new Chart(document.getElementById('chart-history'), {
+            type: 'doughnut',
+            data: {
+                labels: ['Success', 'Partial', 'Failed'],
+                datasets: [{
+                    data: [0, 0, 0],
+                    backgroundColor: ['#19a725', '#d3bf0d', '#b60909'],
+                    borderColor: ['#0f6b17', '#a89209', '#8a0606'],
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: true, animation: false,
+                cutout: '60%',
+                plugins: {
+                    legend: { position: 'bottom', labels: { color: '#163f0c', font: { size: 10 } } }
+                }
+            }
+        });
+
+        async function pollSummary() {
+            try {
+                const d = await (await fetch('http://127.0.0.1:8000/api/stats/summary')).json();
+                const total = d.total || 0;
+                const pct = (n) => total > 0 ? ` | ${Math.round(n / total * 100)}%` : '';
+                document.getElementById('hs-total').textContent = total || '—';
+                document.getElementById('hs-success').textContent = total ? `${d.success}${pct(d.success)}` : '—';
+                document.getElementById('hs-partial').textContent = total ? `${d.partial}${pct(d.partial)}` : '—';
+                document.getElementById('hs-failed').textContent = total ? `${d.failed}${pct(d.failed)}` : '—';
+                document.getElementById('hs-best').textContent = d.best_score ?? '—';
+                document.getElementById('hs-avg').textContent = d.avg_score ?? '—';
+
+                pieChart.data.datasets[0].data = [d.success || 0, d.partial || 0, d.failed || 0];
+                pieChart.update();
+
+                const list = document.getElementById('recent-list');
+                if (d.recent && d.recent.length) {
+                    list.innerHTML = [...d.recent].reverse().map(m => {
+                        const label = m.result === 'success' ? 'SUCCESS'
+                            : m.result === 'partial' ? 'PARTIAL' : 'FAILED';
+                        const ts = new Date(m.ts * 1000).toLocaleTimeString();
+                        return `<div class="rec-entry ${m.result}">
+                            <span>${ts}</span>
+                            <span>${label} &mdash; ${m.score} pts</span>
+                        </div>`;
+                    }).join('');
+                }
+            } catch (e) { /* offline */ }
+        }
+
+        pollSummary();
+        setInterval(pollSummary, 10000); // refresh every 10 s (low priority)
+
+        poll();
+        pollPosition();
+        setInterval(poll, 1000);
+        setInterval(pollPosition, 1000);
+    </script>
+</body>
+
+</html>

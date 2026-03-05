@@ -1,0 +1,622 @@
+<!-- V13 — Mission Control: lat/lon inputs, draw-region, agent speed slider -->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAR Mission Control</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Share Tech Mono', 'Space Mono', monospace;
+            display: flex;
+            height: 100vh;
+            background: #1a1a1a;
+            color: #eee;
+        }
+
+        /* ---- SIDEBAR ---- */
+        #sidebar {
+            width: 310px;
+            background: #252526;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            overflow-y: auto;
+            box-shadow: 2px 0 10px rgba(0, 0, 0, .5);
+        }
+
+        h2 {
+            color: #007acc;
+            font-size: 18px;
+            font-family: 'Orbitron', sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        h3 {
+            font-size: 11px;
+            color: #bbb;
+            border-bottom: 1px solid #444;
+            padding-bottom: 4px;
+            margin-bottom: 6px;
+            font-family: 'Orbitron', sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+        }
+
+        .control-group {
+            margin-bottom: 8px;
+        }
+
+        label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            margin-bottom: 3px;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            cursor: pointer;
+        }
+
+        input[type="number"],
+        input[type="text"] {
+            width: 100%;
+            background: #333;
+            color: #eee;
+            border: 1px solid #555;
+            border-radius: 4px;
+            padding: 5px 8px;
+            font-size: 13px;
+        }
+
+        input[type="number"]:focus,
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #007acc;
+        }
+
+        .val-display {
+            color: #007acc;
+            font-weight: bold;
+        }
+
+        button {
+            background: #2b9910;
+            color: #fff;
+            border: none;
+            padding: 11px;
+            font-size: 15px;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 8px;
+            transition: .2s;
+            font-family: 'Orbitron', sans-serif;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+        }
+
+        button:hover {
+            background: #1d660b;
+        }
+
+        button:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+
+        #btn-mission {
+            background: #28a1aa;
+            margin-top: 4px;
+            font-size: 13px;
+            padding: 9px;
+        }
+
+        #btn-mission:hover {
+            background: #10757c;
+        }
+
+        #btn-stats {
+            background: #b5cc35;
+            margin-top: 4px;
+            font-size: 13px;
+            padding: 9px;
+        }
+
+        #btn-stats:hover {
+            background: #7a8a21;
+        }
+
+        .latlon-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+            margin-bottom: 4px;
+        }
+
+        .latlon-label {
+            font-size: 11px;
+            color: #888;
+            margin-bottom: 2px;
+        }
+
+        /* Draw-region button */
+        #draw-btn {
+            background: #6f42c1;
+            font-size: 12px;
+            padding: 6px 10px;
+            border-radius: 5px;
+            border: none;
+            color: #fff;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 4px;
+            transition: .2s;
+        }
+
+        #draw-btn.active {
+            background: #dc3545;
+        }
+
+        #draw-btn:hover {
+            filter: brightness(1.1);
+        }
+
+        .status-box {
+            background: #1e1e1e;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #444;
+            font-size: 12px;
+            color: #aaa;
+            margin-top: auto;
+            font-family: 'Space Mono', monospace;
+            line-height: 1.6;
+        }
+
+        /* ---- MAP ---- */
+        #map-container {
+            flex-grow: 1;
+            position: relative;
+        }
+
+        #map {
+            height: 100%;
+            width: 100%;
+        }
+
+        /* ---- HUD OVERLAY ---- */
+        #hud {
+            position: absolute;
+            top: 14px;
+            right: 14px;
+            width: 220px;
+            background: rgba(24, 24, 24, .92);
+            border: 1px solid #444;
+            border-radius: 8px;
+            padding: 14px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, .6);
+            z-index: 1000;
+            display: none;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        #hud h3 {
+            color: #007acc;
+            font-size: 13px;
+            text-align: center;
+            border-bottom: 1px solid #444;
+            padding-bottom: 5px;
+            font-family: 'Orbitron', sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+        }
+
+        .stat-label {
+            color: #bbb;
+        }
+
+        .stat-value {
+            font-weight: bold;
+            color: #fff;
+        }
+
+        #hud-mission-status {
+            padding: 6px;
+            text-align: center;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 12px;
+            background: #333;
+            color: #ccc;
+        }
+
+        /* Status colour helpers */
+        .status-safe {
+            background: rgba(34, 197, 94, .25) !important;
+            color: #22c55e !important;
+            border: 1px solid #166534;
+        }
+
+        .status-warning {
+            background: rgba(245, 158, 11, .25) !important;
+            color: #f59e0b !important;
+            border: 1px solid #b45309;
+        }
+
+        .status-danger {
+            background: rgba(239, 68, 68, .25) !important;
+            color: #ef4444 !important;
+            border: 1px solid #991b1b;
+        }
+
+        .status-success {
+            background: rgba(34, 197, 94, .25) !important;
+            color: #22c55e !important;
+            border: 1px solid #166534;
+        }
+
+        .status-partial {
+            background: rgba(245, 158, 11, .25) !important;
+            color: #f59e0b !important;
+            border: 1px solid #b45309;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="sidebar">
+        <h2>SAR Mission Control</h2>
+
+        <div class="control-group">
+            <h3>Mission Centre</h3>
+            <p style="font-size:11px;color:#888;margin-bottom:6px;">Click map or enter coordinates manually.</p>
+            <div class="latlon-row">
+                <div>
+                    <div class="latlon-label">Latitude</div>
+                    <input type="number" id="inp-lat" step="0.0001" value="38.9000" oninput="onLatLonInput()">
+                </div>
+                <div>
+                    <div class="latlon-label">Longitude</div>
+                    <input type="number" id="inp-lon" step="0.0001" value="22.4330" oninput="onLatLonInput()">
+                </div>
+            </div>
+            <label>Radius (m): <span id="val-radius" class="val-display">1000</span></label>
+            <input type="range" id="radius" min="200" max="5000" step="100" value="1000"
+                oninput="updateVal('radius', this.value); updateDrawCircle()">
+            <button id="draw-btn" onclick="toggleDrawMode()">Draw Region on Map</button>
+        </div>
+
+        <div class="control-group">
+            <h3>Targets</h3>
+            <label>Count: <span id="val-targets" class="val-display">5</span></label>
+            <input type="range" id="n_targets" min="1" max="20" value="5" oninput="updateVal('targets', this.value)">
+        </div>
+
+        <div class="control-group">
+            <h3>Enemies</h3>
+            <label>Patrol: <span id="val-patrol" class="val-display">3</span></label>
+            <input type="range" id="n_patrol" min="0" max="10" value="3" oninput="updateVal('patrol', this.value)">
+
+            <label style="margin-top:8px;">Aggressive: <span id="val-aggr" class="val-display">2</span></label>
+            <input type="range" id="n_aggr" min="0" max="10" value="2" oninput="updateVal('aggr', this.value)">
+
+            <label style="margin-top:8px;">Patrol Speed (m/s): <span id="val-patrol-speed"
+                    class="val-display">2.5</span></label>
+            <input type="range" id="patrol_speed" min="0.5" max="10" step="0.5" value="2.5"
+                oninput="updateVal('patrol-speed', this.value)">
+
+            <label>Chase Speed (m/s): <span id="val-aggr-speed" class="val-display">4.5</span></label>
+            <input type="range" id="aggr_speed" min="1" max="15" step="0.5" value="4.5"
+                oninput="updateVal('aggr-speed', this.value)">
+        </div>
+
+        <div class="control-group">
+            <h3>Agent</h3>
+            <label>Robot Speed (m/s): <span id="val-agent-speed" class="val-display">6.0</span></label>
+            <input type="range" id="agent_speed" min="1" max="30" step="0.5" value="6"
+                oninput="updateVal('agent-speed', this.value)">
+        </div>
+
+        <button onclick="sendMapCoordinates()">Deploy Mission</button>
+        <button id="btn-mission" onclick="openMission()" disabled>🗺Live Mission View</button>
+        <button id="btn-stats" onclick="openStats()" disabled>Open Stats Dashboard</button>
+
+        <div class="status-box">
+            <p id="status">Awaiting mission area selection...</p>
+            <p id="coord-display" style="margin-top:4px;font-size:11px;">Lat: -, Lon: -</p>
+        </div>
+    </div>
+
+    <div id="map-container">
+        <div id="map"></div>
+
+        <!-- HUD overlay -->
+        <div id="hud">
+            <h3>Live Status</h3>
+            <div class="stat-row"><span class="stat-label">Score:</span><span class="stat-value" id="hud-score">0</span>
+            </div>
+            <div class="stat-row"><span class="stat-label">Targets Left:</span><span class="stat-value"
+                    id="hud-targets">-</span></div>
+            <div class="stat-row"><span class="stat-label">Enemies:</span><span class="stat-value"
+                    id="hud-enemies">-</span></div>
+            <div class="stat-row"><span class="stat-label">Elapsed:</span><span class="stat-value"
+                    id="hud-elapsed">00:00</span></div>
+            <div id="hud-mission-status">STANDBY</div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script>
+        // --- Map init ---
+        var map = L.map('map').setView([38.900, 22.433], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+
+        // Lock-camera control
+        var followRobot = false;
+        var camCtrl = L.control({ position: 'topright' });
+        camCtrl.onAdd = function () {
+            var div = L.DomUtil.create('div', 'command');
+            div.innerHTML = '<form style="background:white;padding:5px;border-radius:4px;font-size:13px;"><input id="followCheckbox" type="checkbox"/> Lock Camera</form>';
+            L.DomEvent.disableClickPropagation(div);
+            return div;
+        };
+        camCtrl.addTo(map);
+        document.getElementById('followCheckbox').addEventListener('change', e => followRobot = e.target.checked);
+
+        window.updateVal = (id, val) => document.getElementById('val-' + id).innerText = val;
+
+        // ── Lat/Lon + Map Click bidirectional ──
+        var pinMarker = null;
+        var drawCircle = null;
+        var selectedLat = 38.900, selectedLon = 22.433;
+        var drawMode = false;
+        var drawStart = null;
+
+        function syncPin(lat, lon) {
+            selectedLat = lat; selectedLon = lon;
+            if (pinMarker) map.removeLayer(pinMarker);
+            pinMarker = L.marker([lat, lon]).addTo(map);
+            document.getElementById('coord-display').innerText = `Lat: ${lat.toFixed(5)}, Lon: ${lon.toFixed(5)}`;
+            document.getElementById('status').innerText = 'Mission centre selected';
+            // Update draw circle if visible
+            updateDrawCircle();
+        }
+
+        function syncInputs(lat, lon) {
+            document.getElementById('inp-lat').value = lat.toFixed(5);
+            document.getElementById('inp-lon').value = lon.toFixed(5);
+        }
+
+        window.onLatLonInput = function () {
+            var lat = parseFloat(document.getElementById('inp-lat').value);
+            var lon = parseFloat(document.getElementById('inp-lon').value);
+            if (!isNaN(lat) && !isNaN(lon)) {
+                syncPin(lat, lon);
+                map.panTo([lat, lon]);
+            }
+        };
+
+        map.on('click', function (e) {
+            if (drawMode) return; // handled by draw-mode handlers
+            syncPin(e.latlng.lat, e.latlng.lng);
+            syncInputs(e.latlng.lat, e.latlng.lng);
+        });
+
+        // ── Draw Region ──
+        function updateDrawCircle() {
+            if (!drawCircle) return;
+            var r = parseInt(document.getElementById('radius').value);
+            drawCircle.setLatLng([selectedLat, selectedLon]).setRadius(r);
+        }
+
+        window.toggleDrawMode = function () {
+            drawMode = !drawMode;
+            var btn = document.getElementById('draw-btn');
+            if (drawMode) {
+                btn.classList.add('active');
+                btn.textContent = 'Cancel Draw';
+                map.getContainer().style.cursor = 'crosshair';
+                // Show current circle
+                var r = parseInt(document.getElementById('radius').value);
+                if (drawCircle) map.removeLayer(drawCircle);
+                drawCircle = L.circle([selectedLat, selectedLon], {
+                    radius: r, color: '#6f42c1', fillColor: '#6f42c1',
+                    fillOpacity: 0.08, weight: 2, dashArray: '6 3'
+                }).addTo(map);
+                map.on('click', handleDrawClick);
+                map.on('mousemove', handleDrawMove);
+            } else {
+                btn.classList.remove('active');
+                btn.textContent = 'Draw Region on Map';
+                map.getContainer().style.cursor = '';
+                map.off('click', handleDrawClick);
+                map.off('mousemove', handleDrawMove);
+                drawStart = null;
+            }
+        };
+
+        function handleDrawClick(e) {
+            if (!drawStart) {
+                // First click = centre
+                drawStart = e.latlng;
+                syncPin(e.latlng.lat, e.latlng.lng);
+                syncInputs(e.latlng.lat, e.latlng.lng);
+            } else {
+                // Second click = radius edge
+                var r = Math.round(e.latlng.distanceTo(drawStart));
+                r = Math.max(200, Math.min(5000, r));
+                var slider = document.getElementById('radius');
+                slider.value = r;
+                updateVal('radius', r);
+                drawStart = null;
+                toggleDrawMode(); // exit draw mode
+            }
+        }
+
+        function handleDrawMove(e) {
+            if (!drawStart || !drawCircle) return;
+            var r = Math.round(e.latlng.distanceTo(drawStart));
+            r = Math.max(200, Math.min(5000, r));
+            drawCircle.setRadius(r);
+            document.getElementById('val-radius').innerText = r;
+        }
+
+        // Initial pin
+        syncPin(38.900, 22.433);
+        syncInputs(38.900, 22.433);
+
+        // --- Deploy ---
+        window.sendMapCoordinates = async function () {
+            var radius = document.getElementById('radius').value;
+            var n_patrol = document.getElementById('n_patrol').value;
+            var n_aggr = document.getElementById('n_aggr').value;
+            var n_targets = document.getElementById('n_targets').value;
+            var patrol_speed = document.getElementById('patrol_speed').value;
+            var aggr_speed = document.getElementById('aggr_speed').value;
+            var agent_speed = document.getElementById('agent_speed').value;
+
+            var btn = document.querySelector('button');
+            btn.innerText = 'Loading...'; btn.disabled = true;
+            clearMapState();
+
+            try { await fetch('http://localhost:8000/api/sim/clear'); } catch (e) { }
+
+            var url = `http://localhost:8000/api/map/vector?lat=${selectedLat}&lon=${selectedLon}&radius=${radius}&n_patrol=${n_patrol}&n_aggr=${n_aggr}&n_targets=${n_targets}&patrol_speed=${patrol_speed}&aggr_speed=${aggr_speed}&agent_speed=${agent_speed}`;
+            try {
+                let res = await fetch(url);
+                if (res.ok) {
+                    document.getElementById('status').innerText = 'Map loaded! Simulation ready.';
+                    document.getElementById('hud').style.display = 'flex';
+                    document.getElementById('btn-stats').disabled = false;
+                    document.getElementById('btn-mission').disabled = false;
+                    alert('Map & entities loaded!\nClick "Live Mission View" and press Start to begin.');
+                } else {
+                    document.getElementById('status').innerText = 'Server error.';
+                }
+            } catch (err) {
+                document.getElementById('status').innerText = 'Connection failed.';
+            }
+            btn.innerText = 'Deploy Mission'; btn.disabled = false;
+        };
+
+        window.openStats = function () { window.open('stats.html', '_blank'); };
+        window.openMission = function () { window.open('mission.html', '_blank'); };
+
+        // --- Tracking state ---
+        var robotMarker = null, enemyMarkers = {}, targetMarkers = {}, riskMarkers = {};
+
+        function clearMapState() {
+            for (let id in enemyMarkers) map.removeLayer(enemyMarkers[id]);
+            for (let id in targetMarkers) map.removeLayer(targetMarkers[id]);
+            for (let id in riskMarkers) map.removeLayer(riskMarkers[id]);
+            enemyMarkers = {}; targetMarkers = {}; riskMarkers = {};
+            document.getElementById('hud-enemies').innerText = '-';
+            document.getElementById('hud-targets').innerText = '-';
+            document.getElementById('hud-score').innerText = '0';
+            document.getElementById('hud-elapsed').innerText = '00:00';
+            let s = document.getElementById('hud-mission-status');
+            s.className = ''; s.innerText = 'STANDBY';
+        }
+
+        function fmtTime(sec) {
+            let m = Math.floor(sec / 60), s = Math.floor(sec % 60);
+            return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        }
+
+        // --- Live polling ---
+        setInterval(async () => {
+            try {
+                let data = await (await fetch('http://127.0.0.1:8000/api/robot/position')).json();
+
+                if (data.lat && data.lon) {
+                    if (!robotMarker)
+                        robotMarker = L.circleMarker([data.lat, data.lon], { color: '#007bff', radius: 8, fillOpacity: 1.0 })
+                            .addTo(map).bindPopup('SAR Unit');
+                    else robotMarker.setLatLng([data.lat, data.lon]);
+                    if (followRobot) map.panTo([data.lat, data.lon]);
+                }
+
+                if (data.score !== undefined) {
+                    document.getElementById('hud-score').innerText = data.score;
+                    let s = document.getElementById('hud-mission-status');
+                    s.className = '';
+                    if (data.status?.includes('SUCCESS') && !data.status?.includes('PARTIAL')) { s.innerText = 'MISSION SUCCESS'; s.className = 'status-success'; }
+                    else if (data.status?.includes('PARTIAL')) { s.innerText = 'PARTIAL SUCCESS'; s.className = 'status-partial'; }
+                    else if (data.status?.includes('FAIL') || data.status?.includes('CONTACT') || data.status?.includes('STOP')) { s.innerText = 'MISSION FAILED'; s.className = 'status-danger'; }
+                    else if (data.escape_mode) { s.innerText = 'EVADING THREAT'; s.className = 'status-warning'; }
+                    else if (data.lat) { s.innerText = 'ACTIVE'; s.className = 'status-safe'; }
+                    document.getElementById('status').innerText = `Score: ${data.score} | ${data.status}`;
+                }
+
+                if (data.enemies) {
+                    document.getElementById('hud-enemies').innerText = data.enemies.length;
+                    let seenIds = new Set();
+                    data.enemies.forEach(e => {
+                        seenIds.add(e.id);
+                        let color = e.type === 'aggressive' ? '#ef4444' : '#a855f7';
+                        let radius = e.type === 'aggressive' ? 8 : 6;
+                        let pos = [e.lat, e.lon];
+                        if (!enemyMarkers[e.id])
+                            enemyMarkers[e.id] = L.circleMarker(pos, { color, fillColor: color, fillOpacity: 0.85, radius })
+                                .addTo(map).bindPopup(`Enemy (${e.type})`);
+                        else { enemyMarkers[e.id].setLatLng(pos); enemyMarkers[e.id].setStyle({ color, fillColor: color, radius }); }
+                        if (!riskMarkers[e.id])
+                            riskMarkers[e.id] = L.circle(pos, { radius: e.detection_radius_m || 50, color, fillColor: color, fillOpacity: 0.05, weight: 1, dashArray: '4' }).addTo(map);
+                        else { riskMarkers[e.id].setLatLng(pos); riskMarkers[e.id].setStyle({ color, fillColor: color }); }
+                    });
+                    for (let id in enemyMarkers) if (!seenIds.has(parseInt(id))) {
+                        map.removeLayer(enemyMarkers[id]); delete enemyMarkers[id];
+                        if (riskMarkers[id]) { map.removeLayer(riskMarkers[id]); delete riskMarkers[id]; }
+                    }
+                }
+
+                if (data.targets) {
+                    document.getElementById('hud-targets').innerText = data.targets.length;
+                    let seenTids = new Set(data.targets.map(t => t.id));
+                    data.targets.forEach(t => {
+                        if (!targetMarkers[t.id])
+                            targetMarkers[t.id] = L.circleMarker([t.lat, t.lon], { color: 'gold', fillColor: 'gold', fillOpacity: 0.9, radius: 7 })
+                                .addTo(map).bindPopup('Target');
+                    });
+                    for (let id in targetMarkers) if (!seenTids.has(parseInt(id))) {
+                        map.removeLayer(targetMarkers[id]); delete targetMarkers[id];
+                    }
+                }
+            } catch (e) { }
+        }, 200);
+
+        setInterval(async () => {
+            try {
+                let d = await (await fetch('http://127.0.0.1:8000/api/stats')).json();
+                if (d.elapsed !== undefined)
+                    document.getElementById('hud-elapsed').innerText = fmtTime(d.elapsed);
+            } catch (e) { }
+        }, 1000);
+    </script>
+</body>
+
+</html>

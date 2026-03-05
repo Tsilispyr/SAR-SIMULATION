@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAR Live Mission View</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --bg: #0f1117;
+            --surface: rgba(109, 133, 153, 0.93);
+            --border: rgba(109, 133, 153, 0.93);
+            --accent: #b3ca30;
+            --green: #19a725;
+            --yellow: #d3bf0d;
+            --red: #b60909;
+            --purple: #801ddd;
+            --text: #0a3005;
+            --muted: #350000;
+        }
+
+        body {
+            background: var(--bg);
+            font-family: 'Share Tech Mono', monospace;
+            overflow: hidden;
+        }
+
+        #map {
+            position: fixed;
+            inset: 0;
+            z-index: 1;
+        }
+
+        /* --- TOP BAR --- */
+        #topbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 48px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 0 14px;
+            z-index: 1000;
+            backdrop-filter: blur(8px);
+            font-family: 'Share Tech Mono', monospace;
+        }
+
+        #topbar h1 {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--accent);
+            white-space: nowrap;
+            font-family: 'Orbitron', sans-serif;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .top-sep {
+            flex: 1;
+        }
+
+        .top-btn {
+            font-size: 12px;
+            font-weight: 600;
+            padding: 5px 10px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, .06);
+            color: var(--text);
+            cursor: pointer;
+            text-decoration: none;
+            transition: .2s;
+        }
+
+        .top-btn:hover {
+            background: rgba(255, 255, 255, .12);
+        }
+
+        /* Speed buttons */
+        .speed-btn {
+            font-size: 11px;
+            font-weight: 700;
+            padding: 3px 8px;
+            border-radius: 5px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, .06);
+            color: var(--muted);
+            cursor: pointer;
+            transition: .2s;
+        }
+
+        .speed-btn:hover {
+            color: var(--text);
+            background: rgba(255, 255, 255, .12);
+        }
+
+        .speed-btn.active {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff;
+        }
+
+        #speed-label {
+            font-size: 11px;
+            color: var(--muted);
+            white-space: nowrap;
+        }
+
+        /* Status pill */
+        #status-pill {
+            font-size: 11px;
+            font-weight: 700;
+            padding: 3px 12px;
+            border-radius: 20px;
+            border: 1px solid var(--border);
+            color: var(--muted);
+            background: rgba(255, 255, 255, .05);
+            transition: .3s;
+            white-space: nowrap;
+        }
+
+        #status-pill.safe {
+            border-color: var(--green);
+            color: var(--green);
+        }
+
+        #status-pill.warn {
+            border-color: var(--yellow);
+            color: var(--yellow);
+        }
+
+        #status-pill.danger {
+            border-color: var(--red);
+            color: var(--red);
+        }
+
+        #status-pill.success {
+            border-color: var(--green);
+            color: var(--green);
+        }
+
+        #status-pill.partial {
+            border-color: var(--yellow);
+            color: var(--yellow);
+        }
+
+        /* --- MISSION CONTROL PANEL --- */
+        #mission-ctrl {
+            position: fixed;
+            top: 56px;
+            left: 14px;
+            z-index: 1000;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 10px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            backdrop-filter: blur(8px);
+            font-family: 'Share Tech Mono', monospace;
+        }
+
+        #mission-ctrl .ctrl-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--muted);
+            margin-bottom: 2px;
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        .ctrl-row {
+            display: flex;
+            gap: 6px;
+        }
+
+        .mc-btn {
+            flex: 1;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 7px 8px;
+            border-radius: 7px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, .07);
+            color: var(--text);
+            cursor: pointer;
+            transition: .2s;
+            text-align: center;
+            font-family: 'Orbitron', sans-serif;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        .mc-btn:hover:not(:disabled) {
+            background: rgba(255, 255, 255, .14);
+        }
+
+        .mc-btn:disabled {
+            opacity: .35;
+            cursor: not-allowed;
+        }
+
+        .mc-btn.btn-start {
+            border-color: var(--green);
+            color: var(--green);
+        }
+
+        .mc-btn.btn-start:hover:not(:disabled) {
+            background: rgba(34, 197, 94, .15);
+        }
+
+        .mc-btn.btn-pause {
+            border-color: var(--yellow);
+            color: var(--yellow);
+        }
+
+        .mc-btn.btn-pause:hover:not(:disabled) {
+            background: rgba(245, 158, 11, .15);
+        }
+
+        .mc-btn.btn-stop {
+            border-color: var(--red);
+            color: var(--red);
+        }
+
+        .mc-btn.btn-stop:hover:not(:disabled) {
+            background: rgba(239, 68, 68, .15);
+        }
+
+        .mc-btn.btn-restart {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .mc-btn.btn-restart:hover:not(:disabled) {
+            background: rgba(61, 120, 255, .15);
+        }
+
+        /* --- BOTTOM HUD --- */
+        #hud {
+            position: fixed;
+            bottom: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+            z-index: 1000;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .hud-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 9px 14px;
+            backdrop-filter: blur(8px);
+            min-width: 80px;
+            text-align: center;
+            font-family: 'Share Tech Mono', monospace;
+        }
+
+        .hud-label {
+            font-size: 8px;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            color: var(--muted);
+            margin-bottom: 3px;
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        .hud-value {
+            font-size: 22px;
+            font-weight: 900;
+            color: var(--text);
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        .hud-value.c-accent {
+            color: var(--accent);
+        }
+
+        .hud-value.c-good {
+            color: var(--green);
+        }
+
+        .hud-value.c-warn {
+            color: var(--yellow);
+        }
+
+        .hud-value.c-danger {
+            color: var(--red);
+        }
+
+        /* --- LEGEND --- */
+        #legend {
+            position: fixed;
+            bottom: 16px;
+            right: 16px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 9px 12px;
+            z-index: 1000;
+            font-size: 10px;
+            color: var(--text);
+            backdrop-filter: blur(8px);
+            line-height: 1.9;
+            font-family: 'Share Tech Mono', monospace;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+        }
+
+        .leg-dot {
+            display: inline-block;
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            margin-right: 5px;
+            vertical-align: middle;
+        }
+
+        /* --- PATH LINE --- */
+        @keyframes dash {
+            to {
+                stroke-dashoffset: -12;
+            }
+        }
+
+        /* --- MISSION END BANNER --- */
+        #end-banner {
+            display: none;
+            position: fixed;
+            top: 64px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 24px;
+            border-radius: 10px;
+            font-size: 18px;
+            font-weight: 900;
+            text-align: center;
+            border: 2px solid;
+            z-index: 2000;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: .7;
+            }
+        }
+
+        #end-banner.success {
+            background: rgba(34, 197, 94, .2);
+            color: var(--green);
+            border-color: var(--green);
+        }
+
+        #end-banner.partial {
+            background: rgba(245, 158, 11, .2);
+            color: var(--yellow);
+            border-color: var(--yellow);
+        }
+
+        #end-banner.failed {
+            background: rgba(239, 68, 68, .2);
+            color: var(--red);
+            border-color: var(--red);
+        }
+
+        /* --- FOLLOW TOGGLE --- */
+        #follow-toggle {
+            position: fixed;
+            top: 56px;
+            right: 14px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 7px 11px;
+            z-index: 1000;
+            font-size: 11px;
+            color: var(--text);
+            cursor: pointer;
+            backdrop-filter: blur(8px);
+            user-select: none;
+        }
+
+        #follow-toggle.on {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="map"></div>
+
+    <div id="topbar">
+        <h1>SAR Live Mission</h1>
+        <div id="status-pill">STANDBY</div>
+        <span id="topbar-elapsed"
+            style="font-size:16px;font-weight:900;color:var(--text);font-variant-numeric:tabular-nums;">00:00</span>
+        <div class="top-sep"></div>
+        <span id="speed-label">Speed:</span>
+        <button class="speed-btn" data-mult="0.5" onclick="setSpeed(0.5)">0.5×</button>
+        <button class="speed-btn active" data-mult="1" onclick="setSpeed(1)">1×</button>
+        <button class="speed-btn" data-mult="2" onclick="setSpeed(2)">2×</button>
+        <button class="speed-btn" data-mult="4" onclick="setSpeed(4)">4×</button>
+        <button class="speed-btn" data-mult="8" onclick="setSpeed(8)">8×</button>
+        <button class="speed-btn" data-mult="16" onclick="setSpeed(16)">16×</button>
+        <button class="speed-btn" data-mult="32" onclick="setSpeed(32)">32×</button>
+        <button class="speed-btn" data-mult="100" onclick="setSpeed(100)">100×</button>
+        <div class="top-sep"></div>
+        <a class="top-btn" href="index.html">← Control</a>
+        <a class="top-btn" href="stats.html" target="_blank">Analytics</a>
+    </div>
+
+    <!-- Mission control panel -->
+    <div id="mission-ctrl">
+        <div class="ctrl-label">Mission Control</div>
+        <div class="ctrl-row">
+            <button class="mc-btn btn-start" id="mc-start" onclick="mcStart()">Start</button>
+            <button class="mc-btn btn-pause" id="mc-pause" onclick="mcPause()" disabled>Pause</button>
+        </div>
+        <div class="ctrl-row">
+            <button class="mc-btn btn-stop" id="mc-stop" onclick="mcStop()" disabled>Stop</button>
+            <button class="mc-btn btn-restart" id="mc-restart" onclick="mcRestart()" disabled>Restart</button>
+        </div>
+    </div>
+
+    <div id="end-banner"></div>
+    <div id="follow-toggle" class="on" onclick="toggleFollow()">Follow ON</div>
+
+    <div id="hud">
+        <div class="hud-card">
+            <div class="hud-label">Score</div>
+            <div class="hud-value c-accent" id="hud-score">0</div>
+        </div>
+        <div class="hud-card">
+            <div class="hud-label">Targets</div>
+            <div class="hud-value c-warn" id="hud-targets">-</div>
+        </div>
+        <div class="hud-card">
+            <div class="hud-label">Enemies</div>
+            <div class="hud-value c-danger" id="hud-enemies">-</div>
+        </div>
+        <div class="hud-card">
+            <div class="hud-label">AI Mode</div>
+            <div class="hud-value c-good" id="hud-mode">—</div>
+        </div>
+    </div>
+
+    <div id="legend">
+        <div><span class="leg-dot" style="background:#3d78ff"></span>SAR Robot</div>
+        <div><span class="leg-dot" style="background:#22c55e"></span>Auto-Path</div>
+        <div><span class="leg-dot" style="background:gold"></span>Target</div>
+        <div><span class="leg-dot" style="background:#ef4444"></span>Aggressive</div>
+        <div><span class="leg-dot" style="background:#a855f7"></span>Patrol</div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script>
+        // --- Map ---
+        const map = L.map('map', { zoomControl: false }).setView([38.900, 22.433], 15);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, className: 'map-tiles' }).addTo(map);
+        L.control.zoom({ position: 'topright' }).addTo(map);
+
+        // Dark map skin
+        const ds = document.createElement('style');
+        ds.textContent = '.map-tiles { filter: brightness(0.5) invert(1) contrast(1.1) hue-rotate(190deg) saturate(0.7); }';
+        document.head.appendChild(ds);
+
+        // --- State ---
+        let followRobot = true;
+        let missionDone = false;
+        let robotMarker = null;
+        let autoPathLine = null;
+        let enemyMarkers = {};
+        let enemyRings = {};
+        let targetMarkers = {};
+
+        // Mission control state
+        let mcState = 'idle'; // idle | running | paused | stopped | game_over
+
+        function toggleFollow() {
+            followRobot = !followRobot;
+            let btn = document.getElementById('follow-toggle');
+            btn.className = followRobot ? 'on' : '';
+            btn.textContent = followRobot ? 'Follow ON' : 'Follow OFF';
+        }
+
+        function fmtTime(sec) {
+            let m = Math.floor(sec / 60), s = Math.floor(sec % 60);
+            return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        }
+
+        // Robot icon
+        const robotIcon = L.divIcon({
+            className: '',
+            html: `<div style="width:14px;height:14px;background:#3d78ff;border-radius:50%;border:2px solid #fff;box-shadow:0 0 8px #3d78ff,0 0 16px rgba(61,120,255,.5);"></div>`,
+            iconSize: [14, 14], iconAnchor: [7, 7]
+        });
+
+        // ── Mission Control Buttons ──
+        function setMCButtons(state) {
+            mcState = state;
+            let s = document.getElementById('mc-start');
+            let p = document.getElementById('mc-pause');
+            let st = document.getElementById('mc-stop');
+            let r = document.getElementById('mc-restart');
+
+            s.disabled = true; p.disabled = true; st.disabled = true; r.disabled = true;
+            s.textContent = 'Start';
+
+            if (state === 'idle') {
+                s.disabled = false;
+            } else if (state === 'running') {
+                p.disabled = false; st.disabled = false;
+            } else if (state === 'paused') {
+                s.disabled = false; s.textContent = '▶ Resume';
+                st.disabled = false;
+            } else if (state === 'stopped' || state === 'game_over') {
+                r.disabled = false;
+            }
+        }
+
+        async function mcStart() {
+            try {
+                let res = await fetch('http://127.0.0.1:8000/api/sim/start', { method: 'POST' });
+                let d = await res.json();
+                if (d.status === 'running') {
+                    setMCButtons('running');
+                    missionDone = false;
+                    document.getElementById('end-banner').style.display = 'none';
+                } else if (d.status === 'game_over') {
+                    setMCButtons('game_over');
+                }
+            } catch (e) { }
+        }
+
+        async function mcPause() {
+            try {
+                let d = await (await fetch('http://127.0.0.1:8000/api/sim/pause', { method: 'POST' })).json();
+                setMCButtons(d.status === 'paused' ? 'paused' : 'running');
+            } catch (e) { }
+        }
+
+        async function mcStop() {
+            try {
+                await fetch('http://127.0.0.1:8000/api/sim/stop', { method: 'POST' });
+                setMCButtons('stopped');
+            } catch (e) { }
+        }
+
+        async function mcRestart() {
+            try {
+                await fetch('http://127.0.0.1:8000/api/sim/restart', { method: 'POST' });
+                missionDone = false;
+                document.getElementById('end-banner').style.display = 'none';
+                document.getElementById('status-pill').className = '';
+                document.getElementById('status-pill').textContent = 'READY';
+                document.getElementById('hud-score').textContent = '0';
+                document.getElementById('hud-targets').textContent = '-';
+                document.getElementById('hud-enemies').textContent = '-';
+                document.getElementById('topbar-elapsed').textContent = '00:00';
+                if (autoPathLine) { map.removeLayer(autoPathLine); autoPathLine = null; }
+                // GC old markers
+                for (const id in enemyMarkers) { map.removeLayer(enemyMarkers[id]); }
+                for (const id in enemyRings) { map.removeLayer(enemyRings[id]); }
+                for (const id in targetMarkers) { map.removeLayer(targetMarkers[id]); }
+                enemyMarkers = {}; enemyRings = {}; targetMarkers = {};
+                if (robotMarker) { map.removeLayer(robotMarker); robotMarker = null; }
+                setMCButtons('idle');
+            } catch (e) { }
+        }
+
+        // ── Speed ──
+        async function setSpeed(mult) {
+            try {
+                await fetch('http://127.0.0.1:8000/api/sim/speed', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ multiplier: mult })
+                });
+            } catch (e) { }
+            document.querySelectorAll('.speed-btn').forEach(b =>
+                b.classList.toggle('active', parseFloat(b.dataset.mult) === mult));
+        }
+
+        // ── End Banner ──
+        function showEndBanner(status, score) {
+            const b = document.getElementById('end-banner');
+            if (!b || missionDone) return;
+            missionDone = true;
+            if (status?.includes('PARTIAL')) {
+                b.className = 'partial'; b.textContent = `PARTIAL SUCCESS  |  Score: ${score}`;
+            } else if (status?.includes('SUCCESS')) {
+                b.className = 'success'; b.textContent = `MISSION SUCCESS  |  Score: ${score}`;
+            } else {
+                b.className = 'failed'; b.textContent = `MISSION FAILED  |  Score: ${score}`;
+            }
+            b.style.display = 'block';
+            setMCButtons('game_over');
+        }
+
+        // ── Main polling loop ──
+        async function poll() {
+            try {
+                const data = await (await fetch('http://127.0.0.1:8000/api/robot/position')).json();
+
+                // Robot
+                if (data.lat && data.lon) {
+                    const pos = [data.lat, data.lon];
+                    if (!robotMarker) {
+                        robotMarker = L.marker(pos, { icon: robotIcon, zIndexOffset: 1000 })
+                            .addTo(map).bindPopup('SAR Unit');
+                        map.setView(pos, 17);
+                    } else {
+                        robotMarker.setLatLng(pos);
+                    }
+                    if (followRobot) map.panTo(pos, { animate: true, duration: 0.5 });
+                }
+
+                // Auto-path
+                if (data.auto_path && data.auto_path.length > 1) {
+                    if (autoPathLine) map.removeLayer(autoPathLine);
+                    autoPathLine = L.polyline(data.auto_path, {
+                        color: '#22c55e', weight: 3, opacity: 0.85,
+                        dashArray: '8 4'
+                    }).addTo(map);
+                } else if (autoPathLine && (!data.auto_path || data.auto_path.length === 0)) {
+                    map.removeLayer(autoPathLine); autoPathLine = null;
+                }
+
+                // HUD + status pill
+                if (data.score !== undefined) {
+                    document.getElementById('hud-score').textContent = data.score;
+                    const modeEl = document.getElementById('hud-mode');
+                    if (data.escape_mode) {
+                        modeEl.textContent = 'ESCAPE'; modeEl.className = 'hud-value c-danger';
+                    } else {
+                        modeEl.textContent = 'PURSUE'; modeEl.className = 'hud-value c-good';
+                    }
+                    const pill = document.getElementById('status-pill');
+                    pill.className = '';
+                    if (data.game_over) {
+                        if (data.status?.includes('PARTIAL')) { pill.textContent = 'PARTIAL'; pill.classList.add('partial'); }
+                        else if (data.status?.includes('SUCCESS')) { pill.textContent = 'SUCCESS'; pill.classList.add('success'); }
+                        else { pill.textContent = 'FAILED'; pill.classList.add('danger'); }
+                        if (!missionDone) showEndBanner(data.status, data.score);
+                    } else if (data.escape_mode) {
+                        pill.textContent = 'EVADING'; pill.classList.add('warn');
+                    } else if (data.lat) {
+                        pill.textContent = 'ACTIVE'; pill.classList.add('safe');
+                    } else {
+                        pill.textContent = 'STANDBY';
+                    }
+                }
+
+                // Enemies
+                if (data.enemies) {
+                    document.getElementById('hud-enemies').textContent = data.enemies.length;
+                    const seenIds = new Set();
+                    data.enemies.forEach(e => {
+                        seenIds.add(e.id);
+                        const color = e.type === 'aggressive' ? '#ef4444' : '#a855f7';
+                        const radius = e.type === 'aggressive' ? 7 : 5;
+                        const pos = [e.lat, e.lon];
+                        if (!enemyMarkers[e.id]) {
+                            enemyMarkers[e.id] = L.circleMarker(pos, { color, fillColor: color, fillOpacity: 0.9, radius, weight: 2 })
+                                .addTo(map).bindPopup(`Enemy #${e.id} (${e.type})`);
+                            enemyRings[e.id] = L.circle(pos, { radius: e.detection_radius_m || 50, color, fillColor: color, fillOpacity: 0.04, weight: 1, dashArray: '5 3' }).addTo(map);
+                        } else {
+                            enemyMarkers[e.id].setLatLng(pos).setStyle({ color, fillColor: color, radius });
+                            enemyRings[e.id].setLatLng(pos).setStyle({ color, fillColor: color });
+                        }
+                    });
+                    for (const id in enemyMarkers) if (!seenIds.has(parseInt(id))) {
+                        map.removeLayer(enemyMarkers[id]); delete enemyMarkers[id];
+                        if (enemyRings[id]) { map.removeLayer(enemyRings[id]); delete enemyRings[id]; }
+                    }
+                }
+
+                // Targets
+                if (data.targets) {
+                    document.getElementById('hud-targets').textContent = data.targets.length;
+                    const seenTids = new Set(data.targets.map(t => t.id));
+                    data.targets.forEach(t => {
+                        if (!targetMarkers[t.id])
+                            targetMarkers[t.id] = L.circleMarker([t.lat, t.lon], { color: 'gold', fillColor: 'gold', fillOpacity: 0.9, radius: 8, weight: 2 })
+                                .addTo(map).bindPopup(`Target #${t.id}`);
+                    });
+                    for (const id in targetMarkers) if (!seenTids.has(parseInt(id))) {
+                        map.removeLayer(targetMarkers[id]); delete targetMarkers[id];
+                    }
+                }
+            } catch (e) { }
+        }
+
+        // ── Elapsed + sim state sync ──
+        async function pollStats() {
+            try {
+                const d = await (await fetch('http://127.0.0.1:8000/api/stats')).json();
+                if (d.elapsed !== undefined)
+                    document.getElementById('topbar-elapsed').textContent = fmtTime(d.elapsed);
+            } catch (e) { }
+        }
+
+        // Sync mission control button state from server on load
+        async function syncState() {
+            try {
+                const d = await (await fetch('http://127.0.0.1:8000/api/sim/state')).json();
+                if (!d.map_loaded) { setMCButtons('idle'); return; }
+                if (d.game_over) setMCButtons('game_over');
+                else if (d.paused) setMCButtons('paused');
+                else if (d.running) setMCButtons('running');
+                else setMCButtons('idle');
+            } catch (e) { }
+        }
+
+        setMCButtons('idle');
+        syncState();
+        poll();
+        setInterval(poll, 200);
+        setInterval(pollStats, 1000);
+    </script>
+</body>
+
+</html>

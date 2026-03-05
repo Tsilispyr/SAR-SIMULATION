@@ -1,0 +1,19 @@
+version: '3.8'
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"  # REST API & WebSockets port
+    volumes:
+      - ./backend/src:/app/src  # Hot-reload για κώδικα χωρίς rebuild
+      - ./backend/data:/app/data
+    environment:
+      - ENVIRONMENT=development
+
+  # Αν το frontend σου γίνει export σε WebGL/HTML5, μπορεί να το σερβίρουμε μέσω nginx:
+  frontend:
+    build: ./frontend
+    ports:
+      - "8085:80"
+    depends_on:
+      - backend
