@@ -40,6 +40,8 @@
             color: var(--text);
             font-family: 'Share Tech Mono', monospace;
             min-height: 100vh;
+            overflow-y: auto;
+            /* scrollable */
         }
 
         /* ── TOP BAR ── */
@@ -526,16 +528,19 @@
     </div>
 
     <div id="panels">
-        <!-- Score chart -->
-        <div class="panel-card">
-            <h3>Score over Time</h3>
-            <div class="chart-wrap"><canvas id="chart-score"></canvas></div>
-        </div>
+        <!-- Per-agent score charts (dynamic) -->
+        <div id="agent-charts-row" style="grid-column:1/-1;display:flex;flex-wrap:wrap;gap:16px;"></div>
 
-        <!-- Targets chart -->
+        <!-- Targets chart (shared) -->
         <div class="panel-card">
             <h3>Targets Remaining over Time</h3>
             <div class="chart-wrap"><canvas id="chart-targets"></canvas></div>
+        </div>
+
+        <!-- Escape Events chart -->
+        <div class="panel-card">
+            <h3>Escape Events per Agent</h3>
+            <div class="chart-wrap"><canvas id="chart-escape"></canvas></div>
         </div>
 
         <!-- Decision log -->
@@ -590,9 +595,44 @@
 
     <div id="refresh-badge">⟳ live · 1s</div>
 
+    <!-- Score Formula Panel -->
+    <div id="formula-card"
+        style="margin:16px 310px 0 14px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 18px;">
+        <h3
+            style="font-family:'Orbitron',sans-serif;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">
+            Score Formula</h3>
+        <pre style="font-size:11px;line-height:1.8;color:var(--text);white-space:pre-wrap;">Score(t)  =  Σ (+50 per target collected)
+          −  Σ (terrain_penalty per road segment traversed)
+          −  100 per enemy contact (per agent)
+
+Terrain penalties accumulate continuously while moving:
+  Footway / Path → −5   |   Service road → −3
+  Residential    → −2   |   Motorway    → −8
+  Unknown/Other  → −1 to −4 depending on highway type
+
+In multi-agent mode:
+  Score = sum of all agent scores.
+  Each agent independently accumulates targets, terrain costs, escape events.
+  When a target is collected it is removed for ALL agents (cooperative dedup).
+  Agents are pre-assigned distinct targets (greedy by proximity) to maximise
+  spatial coverage and minimise redundant routing.
+
+Escape vs Brave decision:
+  Aggressive enemy within 1.2× detection_radius?
+    → BRAVE if robot arrives at nearest target before enemy  (score stays ↑)
+    → ESCAPE otherwise (score plateaus or dips until threat passes)
+
+Score gradient interpretation:
+  Steep upward steps  = target collected
+  Gradual slope down  = terrain/energy cost
+  Sharp drop          = enemy contact (−100)
+  Flat section        = escape detour, no targets in range</pre>
+    </div>
+
     <script>
-        // ── Charts ──
-        const opts = {
+        // ── Chart setup ──
+        const AGENT_COLORS = ['#3d78ff', '#22c55e', '#f97316', '#e879f9'];
+        const chartOpts = {
             responsive: true, maintainAspectRatio: false, animation: false,
             plugins: { legend: { labels: { color: '#64748b', font: { size: 10 } } } },
             scales: {
@@ -601,18 +641,7 @@
             }
         };
 
-        const scoreChart = new Chart(document.getElementById('chart-score'), {
-            type: 'line',
-            data: {
-                labels: [], datasets: [{
-                    label: 'Score', data: [],
-                    borderColor: '#3d78ff', backgroundColor: 'rgba(61,120,255,.12)',
-                    tension: 0.4, pointRadius: 0, fill: true, borderWidth: 2
-                }]
-            },
-            options: opts
-        });
-
+        // Shared targets-remaining chart
         const targetsChart = new Chart(document.getElementById('chart-targets'), {
             type: 'line',
             data: {
@@ -622,13 +651,51 @@
                     tension: 0.4, pointRadius: 0, fill: true, borderWidth: 2
                 }]
             },
-            options: opts
+            options: chartOpts
         });
 
+        // Escape events bar chart
+        const escapeChart = new Chart(document.getElementById('chart-escape'), {
+            type: 'bar',
+            data: {
+                labels: [], datasets: [{
+                    label: 'Escape Events', data: [],
+                    backgroundColor: AGENT_COLORS.map(c => c + 'cc'),
+                    borderColor: AGENT_COLORS, borderWidth: 1
+                }]
+            },
+            options: { ...chartOpts, scales: { x: { ticks: { color: '#64748b' } }, y: { ticks: { color: '#64748b' }, beginAtZero: true } } }
+        });
+
+        // Per-agent score charts (created dynamically)
+        const agentScoreCharts = {};   // id -> Chart
+        let agentChartCount = 0;
+
+        function ensureAgentChart(id, color, label) {
+            if (agentScoreCharts[id]) return;
+            const row = document.getElementById('agent-charts-row');
+            const wrap = document.createElement('div');
+            wrap.className = 'panel-card';
+            wrap.style.cssText = 'flex:1;min-width:260px;max-width:420px;';
+            wrap.innerHTML = `<h3 style="color:${color}">${label} Score</h3>
+                <div class="chart-wrap"><canvas id="chart-agent-${id}"></canvas></div>`;
+            row.appendChild(wrap);
+            agentScoreCharts[id] = new Chart(document.getElementById(`chart-agent-${id}`), {
+                type: 'line',
+                data: {
+                    labels: [], datasets: [{
+                        label: `${label} Score`, data: [],
+                        borderColor: color, backgroundColor: color + '20',
+                        tension: 0.4, pointRadius: 0, fill: true, borderWidth: 2
+                    }]
+                },
+                options: chartOpts
+            });
+        }
+
         // ── State ──
-        let lastHistLen = 0;
         let logEntries = [];
-        let lastDecision = '';
+        let lastDecisions = {};  // agent_id -> last decision
         let missionDone = false;
 
         function fmtTime(sec) {
@@ -636,11 +703,12 @@
             return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
         }
 
-        function addLogEntry(time, text) {
+        function addLogEntry(time, text, agentId) {
             let type = 'normal';
             if (text.toLowerCase().includes('escape')) type = 'escape';
             else if (text.toLowerCase().includes('brave')) type = 'brave';
-            logEntries.unshift({ time, text, type });
+            const prefix = agentId !== undefined ? `[Agent ${agentId}] ` : '';
+            logEntries.unshift({ time, text: prefix + text, type });
             if (logEntries.length > 60) logEntries.pop();
             renderLog();
         }
@@ -699,27 +767,62 @@
                 if (data.escape_mode) { modeEl.innerText = 'ESCAPE'; modeEl.className = 'kpi-value danger'; }
                 else { modeEl.innerText = 'PURSUE'; modeEl.className = 'kpi-value good'; }
 
-                document.getElementById('kpi-status').innerText = data.status || '—';
+                document.getElementById('kpi-status').innerText = data.status || '\u2014';
                 document.getElementById('kpi-status-sub').innerText = data.game_over ? 'Mission ended' : 'In progress';
 
-                // Decision log
-                if (data.last_decision && data.last_decision !== lastDecision) {
-                    lastDecision = data.last_decision;
+                // Per-agent stats: dynamic chart creation + log + escape bar chart
+                const agents = data.agents_stats || [];
+                if (agents.length > 0) {
+                    agents.forEach((ag, idx) => {
+                        const color = ag.color || AGENT_COLORS[idx % 4];
+                        const label = `Agent ${ag.id}`;
+                        ensureAgentChart(ag.id, color, label);
+                        if (ag.last_decision && ag.last_decision !== lastDecisions[ag.id]) {
+                            lastDecisions[ag.id] = ag.last_decision;
+                            addLogEntry(fmtTime(elapsed), ag.last_decision, ag.id);
+                        }
+                    });
+                    // Escape bar chart
+                    escapeChart.data.labels = agents.map(a => `Agent ${a.id}`);
+                    escapeChart.data.datasets[0].data = agents.map(a => a.escape_events || 0);
+                    escapeChart.data.datasets[0].backgroundColor = agents.map((_, i) => AGENT_COLORS[i % 4] + 'cc');
+                    escapeChart.data.datasets[0].borderColor = agents.map((_, i) => AGENT_COLORS[i % 4]);
+                    escapeChart.update();
+                } else if (data.last_decision && data.last_decision !== (lastDecisions[-1] || '')) {
+                    lastDecisions[-1] = data.last_decision;
                     addLogEntry(fmtTime(elapsed), data.last_decision);
                 }
 
-                // Charts (only on new history)
-                if (data.history && data.history.length > lastHistLen) {
-                    lastHistLen = data.history.length;
+                // Charts — always update on each poll to be real-time
+                if (data.history && data.history.length > 0) {
                     const MAX = 80;
-                    const step = Math.max(1, Math.floor(data.history.length / MAX));
-                    const sam = data.history.filter((_, i) => i % step === 0);
-                    scoreChart.data.labels = sam.map(p => fmtTime(p.t));
-                    scoreChart.data.datasets[0].data = sam.map(p => p.score);
-                    scoreChart.update();
-                    targetsChart.data.labels = sam.map(p => fmtTime(p.t));
+                    const src = data.history;
+                    const step = Math.max(1, Math.floor(src.length / MAX));
+                    const sam = src.filter((_, i) => i % step === 0);
+                    const labels = sam.map(p => fmtTime(p.t));
+
+                    // Targets chart
+                    targetsChart.data.labels = labels;
                     targetsChart.data.datasets[0].data = sam.map(p => p.targets);
                     targetsChart.update();
+
+                    // Per-agent score charts
+                    agents.forEach((ag, idx) => {
+                        const ch = agentScoreCharts[ag.id];
+                        if (!ch) return;
+                        const key = `score_${ag.id}`;
+                        ch.data.labels = labels;
+                        ch.data.datasets[0].data = sam.map(p => (p[key] !== undefined) ? p[key] : p.score);
+                        ch.update();
+                    });
+                    // Fallback single-agent: if no agents_stats, use overall score
+                    if (agents.length === 0 && Object.keys(agentScoreCharts).length === 0) {
+                        ensureAgentChart(0, AGENT_COLORS[0], 'Agent 0');
+                        const ch = agentScoreCharts[0];
+                        ch.data.labels = labels;
+                        ch.data.datasets[0].data = sam.map(p => p.score);
+                        ch.update();
+                    }
                 }
             } catch (e) { /* offline */ }
         }
@@ -740,20 +843,46 @@
             html: `<div style="width:12px;height:12px;background:#3d78ff;border-radius:50%;border:2px solid #fff;box-shadow:0 0 6px #3d78ff;"></div>`,
             iconSize: [12, 12], iconAnchor: [6, 6]
         });
-        let mmRobot = null, mmEnemies = {}, mmTargets = {};
+        function mmAgentIcon(color) {
+            return L.divIcon({
+                className: '',
+                html: `<div style="width:10px;height:10px;background:${color};border-radius:50%;border:1px solid #fff;box-shadow:0 0 5px ${color};"></div>`,
+                iconSize: [10, 10], iconAnchor: [5, 5]
+            });
+        }
+        let mmAgents = {}, mmEnemies = {}, mmTargets = {};
 
         async function pollPosition() {
             try {
                 const d = await (await fetch('http://127.0.0.1:8000/api/robot/position')).json();
-                if (d.lat && d.lon) {
-                    const pos = [d.lat, d.lon];
-                    if (!mmRobot) {
-                        mmRobot = L.marker(pos, { icon: mmRobotIcon }).addTo(miniMap);
-                        miniMap.setView(pos, 16);
+
+                // Multi-agent mini-map
+                const agents = d.agents || [];
+                const COLORS = ['#3d78ff', '#22c55e', '#f97316', '#e879f9'];
+                const seenAgents = new Set();
+                agents.forEach((ag, i) => {
+                    if (!ag.lat || !ag.lon) return;
+                    seenAgents.add(ag.id);
+                    const color = ag.color || COLORS[i % 4];
+                    const pos = [ag.lat, ag.lon];
+                    if (!mmAgents[ag.id]) {
+                        mmAgents[ag.id] = L.marker(pos, { icon: mmAgentIcon(color) }).addTo(miniMap);
+                        if (ag.id === 0) miniMap.setView(pos, 16);
                     } else {
-                        mmRobot.setLatLng(pos);
-                        miniMap.panTo(pos, { animate: true, duration: 0.4 });
+                        mmAgents[ag.id].setLatLng(pos);
                     }
+                    if (ag.id === 0) miniMap.panTo(pos, { animate: true, duration: 0.4 });
+                });
+                for (const id in mmAgents) if (!seenAgents.has(parseInt(id))) {
+                    miniMap.removeLayer(mmAgents[id]); delete mmAgents[id];
+                }
+                // Fallback: position from d.lat/lon for older backend
+                if (agents.length === 0 && d.lat && d.lon) {
+                    const pos = [d.lat, d.lon];
+                    if (!mmAgents[-1])
+                        mmAgents[-1] = L.marker(pos, { icon: mmRobotIcon }).addTo(miniMap);
+                    else mmAgents[-1].setLatLng(pos);
+                    miniMap.panTo(pos, { animate: true, duration: 0.4 });
                 }
                 // Enemies
                 if (d.enemies) {
@@ -819,14 +948,37 @@
                 pieChart.data.datasets[0].data = [d.success || 0, d.partial || 0, d.failed || 0];
                 pieChart.update();
 
+                // Per-agent-count breakdown table
+                const byAg = d.by_agents || {};
+                const breakdown = document.getElementById('hs-by-agents');
+                if (breakdown && Object.keys(byAg).length > 0) {
+                    const rows = [1, 2, 3, 4].filter(n => byAg[n]).map(n => {
+                        const b = byAg[n];
+                        return `<tr>
+                            <td style="color:#b3ca30;font-weight:700;">${n} Agent${n > 1 ? 's' : ''}</td>
+                            <td style="color:#cdd6f4;">${b.total}</td>
+                            <td style="color:#19a725;">${b.success}</td>
+                            <td style="color:#d3bf0d;">${b.partial}</td>
+                            <td style="color:#b60909;">${b.failed}</td>
+                            <td style="color:#b3ca30;">${b.best_score}</td>
+                        </tr>`;
+                    }).join('');
+                    breakdown.innerHTML = rows ? `<table style="width:100%;border-collapse:collapse;font-size:10px;margin-top:8px;">
+                        <tr style="opacity:.6;font-size:9px;letter-spacing:.5px;">
+                            <th style="text-align:left;">Agents</th><th>Total</th><th>Win</th><th>Part</th><th>Fail</th><th>Best</th>
+                        </tr>${rows}</table>` : '';
+                }
+
+                // Recent list with agent count badge
                 const list = document.getElementById('recent-list');
                 if (d.recent && d.recent.length) {
                     list.innerHTML = [...d.recent].reverse().map(m => {
                         const label = m.result === 'success' ? 'SUCCESS'
                             : m.result === 'partial' ? 'PARTIAL' : 'FAILED';
                         const ts = new Date(m.ts * 1000).toLocaleTimeString();
+                        const agBadge = m.n_agents ? ` <span style="opacity:.7;font-size:9px;">${m.n_agents}×Agent</span>` : '';
                         return `<div class="rec-entry ${m.result}">
-                            <span>${ts}</span>
+                            <span>${ts}${agBadge}</span>
                             <span>${label} &mdash; ${m.score} pts</span>
                         </div>`;
                     }).join('');

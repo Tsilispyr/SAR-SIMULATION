@@ -1,222 +1,300 @@
-# SAR-UGV Simulation Project
+# SAR-UGV Simulation
 
-## Concept
-
-This project simulates an autonomous **Search and Rescue Unmanned Ground Vehicle (SAR-UGV)** operating in a real-world urban environment. The robot is deployed to a geographic area, navigates street networks extracted from OpenStreetMap, collects mission targets (simulating survivors or objectives), and evades hostile enemy agents — while being observed and controlled in real time through a browser-based mission control interface.
-
-The simulation was originally prototyped as a standalone **Pygame desktop application** (`SARGV-FIN-CC.py`) using a grid-based map and Matplotlib charts. The current implementation re-architects that concept onto a modern **web stack**: a containerised FastAPI backend handles all AI logic and state, while three HTML pages provide the full operator experience — mission planning, live mission monitoring, and post-mission analytics.
+A fully browser-controllable **Search and Rescue Unmanned Ground Vehicle** simulation running on real OpenStreetMap street networks. Deploy agents to any city on Earth, watch them navigate in real time, evade enemies, collect targets, and review per-agent analytics — all from a browser, no installation required beyond Docker.
 
 ---
 
-## Project Goals
+## What This Is
 
-| Goal | Status |
-|---|---|
-| Autonomous robot navigation using real street data | Complete |
-| Intelligent enemy AI (patrol + aggressive) | Complete |
-| Risk-aware pathfinding (A\* with penalised cost map) | Complete |
-| Real-time browser mission control | Complete |
-| Mission history and statistics | Complete |
-| Live mini-map follow-cam in stats view | Complete |
-| Multi-agent support in browser | Planned |
-| Browser map editor | Planned |
-| Risk heatmap overlay | Planned |
+This project implements the full AI pipeline from an earlier Pygame prototype (`SARGV-FIN-CC.py`) and ports it onto a modern web stack: a containerised **FastAPI backend** handles all AI / game logic, while three vanilla HTML pages give operators the full experience — mission planning, live monitoring, and post-mission analytics.
+
+The key design principle is **separation of concerns**: the frontend is 100% static HTML/JS that polls a REST API. There is no build step, no npm, no framework. A `docker-compose up --build` is the only command you ever need.
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Docker Compose                       │
-│                                                         │
-│  ┌──────────────────────┐   ┌───────────────────────┐   │
-│  │  Backend  :8000      │   │  Frontend  :8085      │   │
-│  │  FastAPI + Uvicorn   │   │  nginx (static)       │   │
-│  │  Python 3.11         │   │  index.html           │   │
-│  │  osmnx / networkx    │   │  mission.html         │   │
-│  │  pyproj              │   │  stats.html           │   │
-│  │  /app/data/stats/    │   │                       │   │
-│  └──────────┬───────────┘   └──────────┬────────────┘   │
-│             │    REST API (JSON)       │                │
-│             └──────────────────────────┘                │
-└─────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│                         Docker Compose                         │
+│                                                                │
+│  ┌──────────────────────────┐   ┌───────────────────────────┐  │
+│  │  Backend  :8000          │   │  Frontend  :8085          │  │
+│  │  FastAPI + Uvicorn       │   │  nginx (static files)     │  │
+│  │  Python 3.10             │   │  index.html               │  │
+│  │  osmnx / networkx        │   │  mission.html             │  │
+│  │  pyproj                  │   │  stats.html               │  │
+│  │                          │   │  editor.html              │  │
+│  │  /app/data/stats/        │   │                           │  │
+│  │  /app/data/scenarios/    │   │                           │  │
+│  │  /app/data/osmnx_cache/  │   │                           │  │
+│  └────────────┬─────────────┘   └──────────────┬────────────┘  │
+│               │       REST/JSON polling        │               │
+│               └────────────────────────────────┘               │
+└────────────────────────────────────────────────────────────────┘
 ```
 
-The backend and frontend are completely decoupled — the frontend is pure static HTML/CSS/JS that polls the backend REST API. There is no build step, no bundler, and no framework — just vanilla web technology for maximum transparency and portability.
+> **Note on data directories:** `Backend/data/stats/`, `Backend/data/scenarios/`, and `Backend/data/osmnx_cache/` are **not tracked in git** — they are created automatically by the backend at runtime. You do not need to create them manually.
 
 ---
 
-## Languages & Technologies
+## Technology Choices
 
-### Python (Backend)
-**Why:** Python has the richest geospatial ecosystem. `osmnx` and `networkx` provide turnkey street graph loading and shortest-path algorithms that would take months to replicate in any other language.
+### Python Backend
 
-| Library | Role | Why chosen |
-|---|---|---|
-| `FastAPI` | REST API framework | Async-native, automatic OpenAPI docs, minimal boilerplate |
-| `uvicorn` | ASGI server | Pairs with FastAPI; lightweight for simulation workloads |
-| `osmnx` | OSM street graph download & projection | Turnkey real-world map data with built-in spatial indexing |
-| `networkx` | Graph data structure & shortest-path | Powers A\*, BFS flood-fill, and reachability checks |
-| `pyproj` | Coordinate system transforms | Converts projected (metres) coords ↔ WGS-84 lat/lon |
+|   Library  |             Role                |                         Why chosen                                 |
+|------------|---------------------------------|--------------------------------------------------------------------|
+| `FastAPI`  | REST API                        | Async-native, minimal boilerplate, auto OpenAPI docs               |
+| `uvicorn`  | ASGI server                     | Lightweight, pairs perfectly with FastAPI                          |
+| `osmnx`    | OSM graph download & projection | Turnkey real-world street topology; no manual map authoring        |
+| `networkx` | Graph algorithms                | A\*, BFS, reachability — battle-tested, extensive docs             |
+| `pyproj`   | CRS transforms                  | Converts projected (metre) coordinates ↔ WGS-84 lat/lon for Leaflet|
 
-### HTML / CSS / JavaScript (Frontend)
-**Why:** Zero build pipeline, runs anywhere, easy to inspect and modify. The UI is operator-facing — clarity and responsiveness matter more than framework sophistication.
+### Vanilla HTML/CSS/JS Frontend
 
-| Library | Role | Why chosen |
-|---|---|---|
-| `Leaflet.js` | Interactive geographic map | Lightweight, tile-agnostic, works offline with local tiles |
-| `Chart.js` | Score and target timeseries charts + doughnut | Simple API, good performance for live-updating data |
-| `Orbitron` / `Share Tech Mono` | Typography | Military/technical aesthetic matching the domain |
+|            Library             |                           Role                             |
+|--------------------------------|------------------------------------------------------------|
+|         `Leaflet.js`           | Interactive geographic map (mission + mini-map)            |
+|          `Chart.js`            | Live-updating line charts and doughnut chart for analytics |
+| `Orbitron` / `Share Tech Mono` | Google Fonts — military aesthetic matching the domain      |
 
-### Docker / Docker Compose
-**Why:** Reproducible environment. `osmnx` and `pyproj` have complex native dependencies (GEOS, PROJ) that are painful to install manually — Docker eliminates that entirely. A single `docker-compose up` brings up the full stack.
+**Why vanilla and not React/Vue?** No build pipeline means no npm, no bundler, no transpilation. The Dockerfile for the frontend is `COPY . /usr/share/nginx/html` — that's it. Any team member can open DevTools and read the source as written.
+
+### Docker Compose
+
+`osmnx` and `pyproj` depend on native libraries (GEOS, PROJ, GDAL) that are painful to install manually. Docker eliminates the environment problem entirely — one command starts the full stack.
 
 ---
 
-## What Is Fully Implemented
+## How It All Works
 
-### AI & Game Logic
+### 1. Map Loading (`/api/map/vector`)
 
-#### A\* Pathfinding with Penalised Cost Map
-The backend builds a **risk-weighted graph** of the street network on every replan cycle. Edge weights are modified by:
-- **Terrain type** (highway → footway, 0.8× → 4.0× cost multiplier sourced from `HIGHWAY_MULTIPLIER`)
-- **Enemy proximity** — tiered penalty zones around each enemy: 10 m = +3000, 30 m = +1500, detection radius = +800, outer ring = +300. Aggressive enemies apply an additional 1.5× multiplier.
-- **Dead-end penalty** — +200 cost for paths terminating in cul-de-sacs.
+When you press **Deploy Mission**, the backend:
+1. Downloads the OSM street graph for the requested area via `osmnx.graph_from_point`
+2. Projects it to local Euclidean metres using `pyproj` (UTM zone auto-detected)
+3. Identifies dead-end nodes via BFS flood-fill
+4. Spawns all entities — either **randomly** (default) or from **custom editor placements** (`mode=custom`)
+5. Returns road geometry as GeoJSON for the Leaflet road overlay
 
-This mirrors the `create_dynamic_cost_map` function from the original Pygame spec and ensures the robot naturally avoids dangerous streets without explicit rule-based avoidance.
+The graph stays in memory for the entire session; subsequent restarts reuse the spawn snapshot without re-downloading.
 
-#### Brave Pathfinding
-When an aggressive enemy is nearby, the robot checks whether it can reach the *nearest target* and arrive with a safety margin of at least 1 step ahead of the enemy. If so, it commits to the target despite the threat ("brave" move). This prevents overly conservative behaviour that would stall the mission indefinitely near zones of conflict.
+### 2. Agent Pathfinding
 
-#### Escape Pathfinding
-If no brave move is available, the robot computes a BFS ring of candidate escape nodes (2–8 hops away) and scores each by `enemy_turns_away − path_length / 4`. It then routes to the highest-scoring candidate via A\* on the penalised graph. If the full escape path fails, a single-step greedy fallback moves one step directly away from the nearest threat.
+Every replan cycle the backend builds a **risk-weighted graph** via `build_penalized_graph`:
 
-#### Enemy AI
-- **Patrol enemies** — random walk on adjacent graph nodes, never backtrack unless forced.
-- **Aggressive enemies** — patrol until the robot enters `detection_radius` (50 m), then switch to A\*-chase on the unweighted graph. Switch back to patrol if the robot escapes range.
+- **Terrain cost** — each edge weight is multiplied by `HIGHWAY_MULTIPLIER[highway_type]`: motorways are 4×, footways are 0.8× (faster but higher penalty to score), residential 1.5×, etc.
+- **Enemy proximity penalty** — tiered rings around each enemy node:
+  - < 10 m → +3000 penalty
+  - < 30 m → +1500
+  - < detection_radius → +800
+  - outer influence ring → +300
+  Aggressive enemies apply an additional 1.5× multiplier on top.
+- **Dead-end avoidance** — +200 cost on edges leading into cul-de-sacs, discouraging the agent from boxing itself into a corner
 
-#### Scoring & Mission End
-- +50 per target collected (within 8 m)
-- −`penalty` per road segment traversed on difficult terrain
-- −100 on enemy contact
-- **Success**: all targets collected
-- **Partial success**: >70% of targets collected when contact occurs
-- **Failed**: <70% targets at contact
+A\* on this penalised graph produces paths that naturally avoid dangerous intersections, prefer through-streets, and route around detection zones without any explicit rules — the cost function does all the work.
 
-### Backend API
+### 3. Decision Logic (per tick)
 
-| Endpoint | Method | Purpose |
-|---|---|---|
-| `/api/map/vector` | GET | Download OSM graph, spawn entities, return road geometry |
-| `/api/robot/position` | GET | Robot lat/lon, enemy markers, target markers, planned path |
-| `/api/robot/telemetry` | POST | Accept position from external controller (Godot override) |
-| `/api/sim/start` | POST | Start or resume the simulation loop |
-| `/api/sim/pause` | POST | Toggle pause |
-| `/api/sim/stop` | POST | Force game-over |
-| `/api/sim/restart` | POST | Restore spawn snapshot and reset state |
-| `/api/sim/speed` | POST | Set speed multiplier (0.25× – 100×) |
-| `/api/sim/state` | GET | Current control state (running/paused/game\_over) |
-| `/api/stats` | GET | Live time-series and decision log for stats.html |
-| `/api/stats/summary` | GET | Aggregated historical win/partial/fail stats from disk |
-| `/api/stats/history` | GET | List saved mission JSON files |
+Each simulation tick the agent runs this decision tree:
 
-### Self-Drive Loop
-The backend runs a **5 Hz async simulation loop** (`simulation_loop`). At each tick it:
-1. Advances the robot position along its planned waypoint path
-2. Calls `game_logic.update()` — terrain scoring, target collection, enemy movement, contact detection
-3. Converts projected coordinates to WGS-84 for the browser
-4. Yields control to any external Godot telemetry if it arrives within 2 seconds (Godot override window)
+```
+1. Any aggressive enemy within detection_radius?
+   │
+   ├─ YES → Can I reach nearest target before the enemy reaches me? (brave check)
+   │         ├─ YES → Pursue target ("brave" mode)
+   │         └─ NO  → Compute escape path (BFS candidate ring + A* to best escape node)
+   │
+   └─ NO  → Pursue current assigned target
+             (or replan to next unvisited target if current is collected)
+```
 
-Speed is controlled by `sim_speed_multiplier` — the effective delta-time per tick is `TICK_RATE × multiplier`, so at 100× the simulation processes 100 seconds of game-time per real second.
+**Escape pathfinding** scores each candidate node in a ring 2–8 hops away as `enemy_turns_away - path_length / 4`. The agent routes to the best-scoring node via A\* on the penalised graph. If A\* fails (disconnected graph fragment), a greedy fallback moves one step directly away from the nearest enemy.
 
-### Frontend Pages
+### 4. Multi-Agent Support
 
-#### `index.html` — Mission Control
-- Set mission centre (click map or manual lat/lon entry)
-- Configure radius, targets, patrol/aggressive enemy counts and speeds, agent speed
-- Draw region on map with live circle preview
-- Deploy button calls `/api/map/vector` and unlocks the Live Mission and Stats buttons
+Up to **4 agents** can run simultaneously. At spawn time, a **greedy pre-assignment** distributes targets to agents by proximity: agent 0 gets its nearest target, that target is removed from the pool, agent 1 gets its nearest from the remaining pool, and so on. This maximises spatial separation and minimises redundant routing.
 
-#### `mission.html` — Live Mission View
+During the mission, if an agent's assigned target is collected by another agent first (cooperative deduplication), it replans to the nearest remaining unassigned target. Each agent independently:
+- Maintains its own path, score, escape mode, and decision log
+- Applies terrain cost to its own score
+- Takes −100 penalty for enemy contact (and is incapacitated if contacted)
+
+The total mission score is the **sum of all agent scores**.
+
+### 5. Simulation Loop
+
+The backend runs a 5 Hz async loop (`simulation_loop`). At each tick:
+1. Each agent advances along its waypoint path by `agent_speed × effective_dt` metres
+2. `SARGameState.update()` runs — terrain scoring, target collection, enemy movement, contact detection
+3. `stats_history` appends a snapshot: `{ t, score, score_0…score_N, targets, escape_mode }`
+4. If all targets collected → **mission success** (stats saved to disk)
+5. If all agents incapacitated → **mission failed / partial** (stats saved to disk)
+
+Speed is controlled by `sim_speed_multiplier` (`/api/sim/speed`). At 100× the effective delta-time per tick is 20 seconds of game-time, so missions complete in seconds of real time.
+
+### 6. Frontend Pages
+
+#### `index.html` — Mission Planner
+- Click the map or enter coordinates to select the mission centre
+- Draw the mission radius interactively on the map
+- Configure: radius, number of targets, patrol / aggressive enemy counts and speeds, number of agents, detection radius
+- **Scenario management**: save named scenarios, load them from a dropdown (the map teleports to the scenario region and previews all placements as coloured markers), or open the map editor
+- Deploy Mission button calls `/api/map/vector` and unlocks the Live Mission / Stats buttons
+- When a scenario is loaded, deploy automatically uses `mode=custom` — the custom editor placements are used instead of random spawning
+
+#### `mission.html` — Live Mission Monitor
 - Full-screen Leaflet map centred on the mission area
-- **Robot marker** (blue glowing dot) following the self-drive path
-- **Enemy markers** — purple (patrol) / red (aggressive) with a translucent detection-radius ring
-- **Target markers** — gold, garbage-collected when collected
-- **Planned path polyline** in cyan
-- **HUD** — score, targets remaining, elapsed time, escape mode indicator, last AI decision
-- **Mission control bar** — Start / Pause / Stop / Restart, plus speed buttons 1× 2× 4× 8× 16× 32× 100×
-- **End banner** — colour-coded SUCCESS / PARTIAL / FAILED overlay
+- **Per-agent coloured markers** (blue / green / orange / pink) with glow effect
+- **Per-agent dashed path polylines** matching agent colour
+- **Enemy markers** — purple (patrol) / red (aggressive) with translucent detection-radius circle
+- **Target markers** — gold, disappear when collected
+- **HUD** — per-agent score tiles, targets remaining, elapsed time, mission status pill
+- **Mission Control bar** — Start / Pause / Stop / Restart + speed presets (1× to 100×)
+- **Self-contained deploy panel** — collapsible panel lets you deploy a brand-new mission without returning to index.html; pre-populates from the current map parameters via `/api/map/info`
+- **End banner** — colour-coded SUCCESS / PARTIAL / FAILED overlay with final score
 
-#### `stats.html` — Mission Analytics
-- KPI strip — score, targets, enemies, AI mode (PURSUE/ESCAPE), status
-- Score over time chart (Chart.js line)
-- Targets remaining over time chart (Chart.js line)
-- AI Decision Log — auto-appended entries, colour-coded by decision type
-- **Mission History panel** — doughnut chart (success/partial/failed) with counts and percentages, best/avg score, recent missions log
-- **Live mini-map** — fixed 280×200 px Leaflet window in the top-right corner, follows the robot in real time, shows enemy and target markers with the same dark tile skin as mission.html
+#### `stats.html` — Analytics Dashboard
+- KPI strip — real-time score, targets remaining, escape mode, mission status
+- **Per-agent score charts** — one Chart.js line chart per agent, dynamically created as agents are detected, always updating in real time
+- **Targets remaining over time** chart
+- **Escape events** bar chart — shows when and how often each agent entered escape mode
+- **AI Decision Log** — live-appended entries colour-coded by agent and decision type
+- **Live mini-map** — 280×200 px Leaflet follower in the top-right, dark-styled, shows all agents, enemies, and targets in real time
+- **Mission History panel** — doughnut (success / partial / failed), best/avg score, recent missions with agent-count badge, and a per–agent-count breakdown table (1×Agent, 2×Agents, etc.)
+- **Score Formula panel** — collapsible explanation of how points are calculated
 
-### Infrastructure
-- Backend Dockerised with `osmnx` cache volume (`/app/data/osmnx_cache`) — avoids re-downloading map tiles
-- Mission stats persisted to `/app/data/stats/mission_<timestamp>.json` — survive container restarts
-- Frontend served by **nginx** on port 8085
-- `docker-compose.yml` ties the whole stack together in one command
+#### `editor.html` — Scenario Editor
+- Leaflet map with a tool palette: Agent / Target / Patrol / Aggressive / Clear
+- Click the map to place entities; the backend stores them in `editor_state`
+- Save to a named JSON file (`/api/scenario/save`)
+- Load existing scenarios from disk for re-editing
+- Deploy Custom Mission button pushes the current placements and calls `/api/map/vector?mode=custom`
 
 ---
 
-## Design Decisions & Rationale
+## Scoring
 
-### Why separate from Pygame?
-The original Pygame prototype (`SARGV-FIN-CC.py`) was excellent for rapid iteration but had hard limitations: no remote access, no multi-user, no real geographic data. The browser/API split allows the simulation to run headlessly on a server while operators connect from anywhere.
+```
+Score(t)  =  Σ ( +50  per target collected )
+           − Σ ( terrain_penalty × road segment traversed per agent )
+           − 100 per enemy contact (per agent)
 
-### Why REST polling instead of WebSockets?
-1Hz polling is sufficient for this fidelity of simulation — the robot moves at 6 m/s simulated and the map resolution is ~2 m waypoints. WebSockets would add complexity with negligible UX benefit at this update rate.
+Terrain penalties (applied continuously while moving):
+  Motorway / trunk  →  −8 per segment
+  Footway / path    →  −5
+  Service road      →  −3
+  Residential       →  −2
+  Unknown / other   →  −1 to −4
 
-### Why vanilla HTML/CSS/JS?
-No build step means no npm, no webpack, no transpilation. A Dockerfile that copies three HTML files and runs nginx is the most reliable deployment story possible. Any team member can open DevTools and read the source exactly as written.
+Mission outcome:
+  SUCCESS  →  all targets collected
+  PARTIAL  →  ≥70% collected when last agent incapacitated
+  FAILED   →  <70% collected
+```
 
-### Why osmnx over custom map?
-Real street topology (intersections, one-ways, lane counts, road type) is free, accurate, and covers every city. The spec's grid map was a simplification — osmnx gives actual navigational realism for the same algorithmic cost.
+In multi-agent mode the score is the **sum of all agent scores**. Stats are saved per-mission to `/app/data/stats/` and grouped by agent count in the history dashboard.
 
-### Why dead-end penalties?
-Urban dead-ends (cul-de-sacs) are disproportionately risky for a vehicle that has to reverse its path to escape. Adding +200 cost to all dead-end adjacent edges makes the planner prefer through-streets, which empirically reduces enemy-contact events by ~30% in test runs.
+---
+
+## Backend API Reference
+
+|         Endpoint       | Method |                     Description                                  |
+|------------------------|--------|------------------------------------------------------------------|
+| `/api/map/vector`      |  GET   | Download OSM graph, spawn entities, return road GeoJSON          |
+| `/api/map/info`        |  GET   | Current map parameters (lat, lon, radius, entity counts, speeds) |
+| `/api/robot/position`  |  GET   | All agent positions, paths, enemies, targets                     |
+| `/api/sim/start`       |  POST  | Start or resume the simulation loop                              |
+| `/api/sim/pause`       |  POST  | Toggle pause                                                     |
+| `/api/sim/stop`        |  POST  | Force game-over                                                  |
+| `/api/sim/restart`     |  POST  | Restore spawn snapshot (no re-download needed)                   |
+| `/api/sim/speed`       |  POST  | Set speed multiplier (0.25× – 100×)                              |
+| `/api/sim/state`       |  GET   | Running / paused / game_over flags                               |
+| `/api/sim/clear`       |  GET   | Wipe all entities (called before re-deploying)                   |
+| `/api/stats`           |  GET   | Live time-series history + decision log                          |
+| `/api/stats/summary`   |  GET   | Aggregated win/loss stats from disk, grouped by agent count      |
+| `/api/stats/history`   |  GET   | List of saved mission JSON files                                 |
+| `/api/editor/place`    |  POST  | Place an entity in the editor state                              |
+| `/api/editor/clear`    |  POST  | Clear all editor placements                                      |
+| `/api/editor/state`    |  GET   | Current editor placements                                        |
+| `/api/scenario/save`   |  POST  | Save editor placements + params to a named JSON file             |
+| `/api/scenario/load`   |  POST  | Load a scenario and push placements into editor state            |
+| `/api/scenario/list`   |  GET   | List all saved scenario files                                    |
+| `/api/scenario/delete` | DELETE | Delete a scenario file                                           |
 
 ---
 
 ## Running the Project
 
 ```bash
-# Full stack (backend + frontend)
+# Full stack (recommended)
 docker-compose up --build
+```
 
-# Backend only (for development)
+Then open **http://localhost:8085**.
+
+- Mission planner: http://localhost:8085/index.html
+- Live mission: http://localhost:8085/mission.html
+- Analytics: http://localhost:8085/stats.html
+- Map editor: http://localhost:8085/editor.html
+
+```bash
+# Backend only (development)
 cd Backend
+pip install -r requirements.txt
 uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Then open **http://localhost:8085** for the mission control interface, or  
-open `Frontend/index.html` directly in a browser (set API URL to `http://localhost:8000`).
+Then open the HTML files directly in a browser (`file://`).
 
 ---
 
 ## Repository Structure
 
 ```
-SIM_Project/
+SAR-SIMULATION/
 ├── Backend/
 │   ├── Dockerfile
 │   ├── requirements.txt
-│   ├── data/
-│   │   ├── osmnx_cache/       ← cached OSM graph downloads
-│   │   └── stats/             ← saved mission JSON files
 │   └── src/
-│       └── main.py            ← FastAPI app, all AI logic
+│       └── main.py            ← FastAPI app + all AI logic (~1600 lines)
+│   # Backend/data/ is created at runtime — not in git:
+│   #   data/stats/            ← saved mission JSON files
+│   #   data/scenarios/        ← saved custom scenario JSON files
+│   #   data/osmnx_cache/      ← cached OSM graph downloads
 ├── Frontend/
 │   ├── Dockerfile             ← nginx container
-│   ├── index.html             ← mission control
-│   ├── mission.html           ← live mission view
-│   └── stats.html             ← analytics dashboard
-├── SARGV-FIN-CC.py            ← original Pygame spec (v7.0)
+│   ├── index.html             ← mission planner
+│   ├── mission.html           ← live mission monitor
+│   ├── stats.html             ← analytics dashboard
+│   └── editor.html            ← scenario map editor
+├── SARGV-FIN-CC.py            ← original Pygame prototype (reference)
 ├── docker-compose.yml
-└── FUTURE_WORK.md
+├── README.md
+├── FUTURE_WORK.md
+└── .gitignore
 ```
+
+> `__pycache__/`, `*.pyc`, and all `Backend/data/` subdirectories are excluded by `.gitignore`. The data directories are created automatically when the backend first runs — you do not need to create or commit them.
+
+---
+
+## Design Decisions
+
+### Why REST polling instead of WebSockets?
+The frontend polls at 200 ms (position) and 1 s (stats). This is sufficient for 6 m/s agents on a 2-metre waypoint grid. WebSockets would add connection lifecycle complexity with negligible UX improvement at this update rate. Polling also makes the API trivially curl-able for debugging.
+
+### Why osmnx over a custom map?
+Real street topology — intersections, one-ways, road width classifications, path type — is free, accurate, and covers every city on Earth. The original Pygame prototype used a synthetic grid which required manual map authoring and had no geographic fidelity. osmnx gives navigational realism at zero authoring cost.
+
+### Why dead-end avoidance?
+Urban cul-de-sacs are asymmetrically dangerous: an agent that routes into a dead-end must reverse its path to escape, giving enemies a predictable vector. Adding +200 cost to dead-end-adjacent edges biases the planner toward through-streets empirically reducing enemy contact events by ~30% in test runs.
+
+### Why greedy target pre-assignment?
+Random assignment leads to agents clustering on the same targets. Distance-greedy assignment (nearest target per agent, no repeats) achieves the best spatial coverage with O(n²) computation where n ≤ 20 targets. Optimal assignment (Hungarian algorithm) is O(n³) and unnecessary at this scale.
+
+### Why save scenarios as JSON instead of a database?
+The scenario set is small (tens of files, each < 5 KB). A flat JSON file per scenario is zero-dependency, human-readable, and trivially backed up. Adding a database would introduce an extra container with no practical benefit.
+
+### Why vanilla HTML?
+No framework, no build. The entire frontend deploys as three HTML files `COPY`-ed into nginx. Any operator with a text editor can modify the UI. This is an academic simulation tool — auditability trumps abstraction.

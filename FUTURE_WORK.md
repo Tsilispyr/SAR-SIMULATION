@@ -1,120 +1,172 @@
-# SAR-UGV — Future Work & Roadmap
+# SAR-UGV — Future Work & Remaining Roadmap
 
-This document outlines the features and improvements that are **not yet implemented** in the current web stack, why they matter, and the approach we plan to take for each.
+This document lists features that are **not yet implemented**, explains why they matter, and proposes concrete approaches based on the existing code architecture.
+
+Everything listed in the original FUTURE_WORK.md as "planned" is now **fully implemented** in the current codebase:
+
+- Multi-agent simulation (up to 4 agents)
+- Per-agent browser rendering (coloured markers + path polylines)
+- Per-agent HUD tiles and score charts
+- Browser-based map editor (`editor.html`)
+- Custom scenario save / load / delete
+- Configurable enemy detection radius (slider in index.html)
+- Scenario loading with map teleport and placement preview
+- Self-contained live mission view (deploy new mission without leaving mission.html)
+- Mission history grouped by agent count
+- Real-time chart updates (every poll cycle)
+
+What remains below is the **next tier** of features that would push this from a functional simulation into a full research or demonstration platform.
 
 ---
 
-## 1. Multi-Agent Rendering in the Browser
+## 1. Risk Heatmap Overlay
 
 ### What is missing
-The backend simulation engine (`SARGameState`) supports up to **4 simultaneous agents** with cooperative target de-duplication and per-agent path planning. The frontend currently tracks only a single robot marker. There are no per-agent path polylines, no per-agent HUD columns, and no colour differentiation between agents.
+The backend builds a `build_penalized_graph` on every replan that encodes enemy threat, terrain cost, and dead-end risk into edge weights. This data is used for pathfinding but never shown to the operator. The Pygame prototype rendered a colour-coded heatmap directly on the game field.
 
 ### Why it matters
-The original Pygame spec (SARGV-FIN-CC.py) treats multi-agent co-op as a core feature — agents share target assignments and divide search area organically. Running a single agent is a subset of the full design intent.
+Operators viewing the live mission cannot understand *why* an agent chose a particular route. A heatmap overlay instantly communicates the threat landscape — which streets are safe (green), which are in enemy influence zones (yellow/orange), and which are extremely dangerous (red).
 
-### Planned approach
-1. **Backend** — extend `/api/robot/position` to return an array of agent states (`{ id, lat, lon, path, score, status }`). The existing `SARGameState` already tracks `robot_x/y` per-instance; we need to wrap it in a list of agents or extend the state class.
-2. **Frontend** — maintain a map of `agentId → { marker, polyline }` in `mission.html`, each agent coloured distinctly (blue / green / orange / pink mirroring the spec's agent colour list). HUD columns expand horizontally to show per-agent score and status.
-3. **Stats** — per-agent charts for score and target contribution over time in `stats.html`.
+### Proposed approach
+1. **Backend** — add a `GET /api/sim/costmap` endpoint that runs `build_penalized_graph` (already called each tick anyway) after the fact and samples the weight of each node's cheapest outgoing edge. Returns `[{lat, lon, cost_norm}]` for every graph node (typically 500–3000 nodes for a 1 km radius area).
+2. **Frontend** — render with [Leaflet.heat](https://github.com/Leaflet/Leaflet.heat) (a single ~6 KB plugin). Colour ramp: blue (0) → yellow (0.5) → red (1.0) mapped to normalised cost.
+3. **Performance** — update the heatmap every 3–5 seconds (much lower priority than position polling). Downsample to every 2nd node if needed; imperceptible on a dense street graph.
+
+### Estimated effort
+Medium. The backend computation already exists; this is largely a frontend rendering task.
 
 ---
 
-## 2. Risk Heatmap Overlay (Costmap Visualisation)
+## 2. Post-Mission Freeze / Final Report
 
 ### What is missing
-The Pygame spec renders a **live colour-coded heatmap** below the game field showing the dynamic cost map — green (safe) through yellow (caution) to red (enemy influence). The web frontend computes the cost map on every replan but never exposes it to the browser.
+When a mission ends (`game_over = true`) the analytics page (`stats.html`) continues polling. Charts keep updating (with the same frozen data) and there is no clear "this is the final state" moment. The Pygame prototype had a dedicated report screen that froze all charts and displayed a structured summary.
 
 ### Why it matters
-The heatmap is one of the most valuable analytical outputs — it gives operators an immediate intuition of why the robot chose a particular route and how the enemy threat landscape evolves over time.
+For academic use — comparing strategies, logging performance — you need a stable, printable end-state rather than a live-polling page that visually appears to keep running.
 
-### Planned approach
-1. **Backend** — add a `/api/sim/costmap` endpoint that returns a list of `{ lat, lon, cost }` samples (one per graph node or grid cell) computed from `build_penalized_graph`.
-2. **Frontend** — render as a Leaflet **heatmap layer** using `Leaflet.heat` (plugin, ~15 KB). Colour ramp: blue → yellow → red mapped to normalised cost 0–1. Update every 2–3 seconds (lower priority than position).
-3. **Performance** — the OSM graph can have 1000–5000 nodes in a 1.5 km radius. We will downsample to a representative subset (every 3rd node) or use a fixed grid sampled from the graph for manageable payload size.
+### Proposed approach
+1. When `poll()` in `stats.html` detects `game_over === true`, stop all `setInterval` polling timers.
+2. Show a full-width **Mission Complete** panel above the charts with: final score, elapsed time, per-agent breakdown, outcome label.
+3. Add an **Export PDF / Print** button that calls `window.print()` with print-media CSS hiding the map and only showing charts + summary table.
+4. Add a **"Watch Replay"** button stub that clears the freeze and re-enables polling for reviewing telemetry of a completed mission.
+
+### Estimated effort
+Small–Medium. Mostly frontend work; no new backend endpoints required.
 
 ---
 
-## 3. Browser-Based Map Editor
+## 3. Terrain Tile Overlay (Road Penalty Visualisation)
 
 ### What is missing
-The Pygame spec includes a full **MapEditor** class allowing manual placement of agents, targets, patrol enemies, aggressive enemies, obstacles, and terrain types on a grid. The web deploy currently only accepts counts and a geographic radius — there is no way to hand-craft a specific scenario.
+Every road on the Leaflet map looks identical regardless of its traversal cost. The cost multipliers in `HIGHWAY_MULTIPLIER` (motorway = 4.0×, footway = 0.8×, residential = 1.5×) influence every routing decision but are invisible to the operator.
 
 ### Why it matters
-Custom scenarios are essential for repeatable testing and demonstration — you can design a specific tactical situation (e.g. a chokepoint with two aggressive enemies guarding the final target) that is impossible to reproduce reliably with random spawns.
+Without terrain visualisation, the operator cannot tell why an agent preferred one street over another that looks equally short. Adding even a simple colour-coded stroke makes the cost model immediately legible.
 
-### Planned approach
-1. Add a new **`editor.html`** page linked from `index.html`.
-2. Use the existing Leaflet map as the canvas — clicking the map in different "tool modes" (agent / target / patrol / aggressive / clear) calls a backend endpoint to register the entity at that location.
-3. **Backend** — add `/api/editor/place` (POST with `type`, `lat`, `lon`) and `/api/editor/clear` endpoints. These populate a separate "custom scenario" snapshot that overrides the random spawn when `/api/map/vector` is called with `mode=custom`.
-4. Persist custom scenarios as JSON files so they can be replayed without re-editing.
+### Proposed approach
+1. **Backend** — extend the `/api/map/vector` GeoJSON response to include a `terrain_class` property per road feature: `"free"` / `"difficult"` / `"hazard"` derived from the `HIGHWAY_SCORE_PENALTY` table.
+2. **Frontend** — in `mission.html` and `index.html`, stroke each road polyline accordingly:
+   - `"free"` → light white (unchanged from current)
+   - `"difficult"` → amber (#f59e0b)
+   - `"hazard"` → red (#ef4444)
+3. Add a toggle checkbox in `index.html` sidebar ("Show Terrain Cost") to switch the overlay on/off.
+
+### Estimated effort
+Small. Most of the data already exists in the backend; this is a GeoJSON property + rendering change.
 
 ---
 
-## 4. Configurable Enemy Detection Radius
+## 4. Pause-Aware Elapsed Time Accuracy
 
 ### What is missing
-The `Enemy.detection_radius` is hardcoded to **50 metres** in the backend. The frontend deploy form exposes `aggr_speed` and `patrol_speed` but has no slider or input for detection range.
+`mission_elapsed` increments by `effective_dt` every tick. The loop stops cleanly on pause, but there may be sub-tick drift during the pause/resume handoff — the elapsed time could gain a few milliseconds on every pause cycle.
 
 ### Why it matters
-Detection radius is arguably the most impactful single parameter for difficulty tuning — a 30 m radius makes the robot very safe; a 100 m radius makes most of the map a threat zone. Without control over this, scenario design is limited.
+Non-critical for casual use, but matters if elapsed time is used as a benchmark metric for comparing strategies across runs. A timer that drifts by 50 ms per pause cycle is not reproducible.
 
-### Planned approach
-1. **Backend** — add `detection_radius: float = 50.0` as a query parameter to `/api/map/vector`, passed through to `spawn_objects` and stored in `current_map_data`.
-2. **Frontend** — add a range slider in `index.html` between the enemy speed sliders, labelled "Enemy Detection Radius (m)" with range 20–150 m and default 50 m.
-Quick change — estimated 30 minutes total.
+### Proposed approach
+1. Add `_pause_wall_start: float` to `SARGameState`.
+2. On pause: record `_pause_wall_start = time.monotonic()`.
+3. On resume: subtract `(time.monotonic() - _pause_wall_start) * sim_speed_multiplier` from `mission_elapsed` before the next tick.
+4. Unit test: pause/resume 100 times, assert elapsed drift < 10 ms.
+
+### Estimated effort
+Tiny. Two lines of backend code + a unit test.
 
 ---
 
-## 5. Post-Mission Freeze / Final Report View
+## 5. Agent Communication & Blackboard
 
 ### What is missing
-In the Pygame spec, a mission end triggers a dedicated **report screen** that freezes the chart at the mission-end timestamp and shows final score, time, and per-agent breakdown before returning to the menu. The web `stats.html` continues polling after the mission ends — charts update but the "mission-end freeze" moment is not clearly delineated.
+Agents currently communicate implicitly — a target collected by one agent disappears from the shared `game_logic.targets` list, so others will replan away from it. There is no explicit coordination mechanism: no "I am heading to target 3, please take target 7" message passing, no spatial awareness of teammate positions.
 
 ### Why it matters
-Operators reviewing a completed mission need a stable, printable final state — not a live-polling page that appears to keep changing after the mission has ended.
+This is the core algorithmic gap between the current greedy pre-assignment and a true multi-agent cooperative system. With a blackboard, agents could:
+- Avoid routing through areas another agent already covers
+- Hand off targets if one agent is in danger
+- Build a shared threat model updated by all agents' observations
 
-### Planned approach
-1. When `poll()` in `stats.html` detects `game_over = true`, stop all further polling and take a **snapshot** of the current chart data.
-2. Display a full-width overlay panel (similar to the result banner) with the final score, elapsed time, and a breakdown of each result metric.
-3. Add a **"Export Report"** button that calls `window.print()` with a print-media CSS that hides the map and control elements and shows only the final charts and summary table.
+### Proposed approach
+1. Add a `blackboard: dict` to `SARGameState` — a shared key-value store all agents can read/write each tick.
+2. Agents write their **intended next target** and **current position** to the blackboard at the start of each tick.
+3. During target selection, an agent reads blackboard entries and adds a soft penalty to targets already claimed by teammates.
+4. Add `/api/sim/blackboard` GET endpoint for the frontend to visualise coordination (optional).
+
+### Estimated effort
+Large. Requires careful design to avoid race conditions between agent ticks.
 
 ---
 
-## 6. Tile Terrain Overlay
+## 6. Unit & Integration Tests
 
 ### What is missing
-The spec's tile system classifies every cell as Free / Difficult / Hazard / Obstacle and renders each with a distinct colour. The web stack applies road-type cost multipliers (`HIGHWAY_MULTIPLIER`) to pathfinding but does **not visualise** these terrain categories on the Leaflet map — every street looks identical regardless of its traversal cost.
+There is no automated test suite. All verification has been manual (browser + log inspection). A project of this complexity needs regression tests — especially for pathfinding edge cases, multi-agent state management, and scenario save/load round-trips.
 
 ### Why it matters
-Without terrain visualisation, operators cannot make informed decisions about route preferences. They can see where the robot went, but not *why* it avoided certain streets.
+Every change to `main.py` risks silently breaking pathfinding, score calculation, or restart logic. A test suite catches regressions in seconds rather than minutes of manual testing.
 
-### Planned approach
-1. **Backend** — extend `/api/map/vector` response to include per-edge terrain category (`free` / `difficult` / `hazard`) derived from `HIGHWAY_SCORE_PENALTY` lookup.
-2. **Frontend** — render as Leaflet polylines with a colour-coded stroke: white = free, amber = difficult, red = hazard. Toggle visibility with a checkbox in the `index.html` sidebar.
+### Proposed approach
+Create `Backend/tests/` with:
+- `test_pathfinding.py` — unit tests for `build_penalized_graph`, `astar_path`, escape candidate scoring
+- `test_game_state.py` — test spawn, target collection, scoring, multi-agent dedup, game_over conditions
+- `test_api.py` — FastAPI `TestClient` integration tests for all REST endpoints
+- `test_scenario.py` — save → load → deploy round-trip with assertion on placement count and parameters
+
+Use `pytest` + `pytest-asyncio`. Add to CI (GitHub Actions) on push to main.
+
+### Estimated effort
+Large (first-time setup), then ongoing maintenance is small per new feature.
 
 ---
 
-## 7. Pause-Aware Elapsed Time Accuracy
+## 7. Godot / ROS Integration (External Controller Override)
 
 ### What is missing
-The simulation's `mission_elapsed` counter increments by `effective_dt` every tick regardless of whether the simulation is in a conceptually "running" state from the operator's perspective. Pausing stops the simulation loop cleanly, but there may be edge cases where the timer accumulates fractional ticks during the pause/resume transition.
+The backend has a `/api/robot/telemetry` POST endpoint that accepts external position overrides (originally designed for a Godot 3D client). This is partially implemented but untested end-to-end. The "Godot override window" logic in `simulation_loop` waits 2 seconds for external telemetry before falling back to self-drive.
 
-### Planned approach
-1. Add a `_pause_start_time` field to `SARGameState`.
-2. On pause, record `_pause_start_time = time.time()`.
-3. On resume, subtract `(time.time() - _pause_start_time)` from the effective elapsed before the next tick.
-4. Write a unit test in `test_ai.py` that cycles pause/resume 100× and asserts elapsed drift < 0.01 s.
+### Why it matters
+Connecting a physics simulator (Godot) or a real ROS-based robot would elevate this from a waypoint simulation to a high-fidelity platform testbed — agents move with realistic dynamics rather than teleporting between graph nodes.
+
+### Proposed approach
+1. Document the telemetry API contract (`{ agent_id, lat, lon, heading, speed }`).
+2. Build a minimal Godot 4 scene with a `HTTPRequest` node that posts agent position every 100 ms.
+3. Extend the backend to accept per-agent telemetry (currently assumes single agent).
+4. Add a `mode=telemetry` flag to `SARGameState` that disables self-drive for agents receiving external position feed.
+
+### Estimated effort
+Large. Requires Godot scene + backend protocol extension.
 
 ---
 
-## Priority Order
+## Priority Summary
 
-| Priority | Feature | Effort estimate |
-|---|---|---|
-| High | Enemy Detection Radius slider | 
-| High | Post-Mission Freeze / Report |
-| Medium | Pause-aware elapsed time fix |
-| Medium | Terrain overlay on map | 
-| Large | Risk Heatmap overlay | 
-| Large | Multi-agent browser rendering | 
-| Major | Browser map editor |
+| Priority  |           Feature                 |    Effort     |
+|-----------|-----------------------------------|---------------|
+|    High   | Post-mission freeze / report view | Small–Medium  |
+|    High   | Terrain tile overlay              | Small         |
+|    High   | Unit & integration tests          | Medium–Large  |
+|   Medium  | Risk heatmap overlay              | Medium        |
+|   Medium  | Pause-aware timer fix             | Tiny          |
+|    Low    | Agent blackboard / coordination   | Large         |
+|  Research | Godot / ROS integration           | Large         |

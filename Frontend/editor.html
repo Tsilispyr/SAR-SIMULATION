@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAR Mission Editor</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --bg: #0f1117;
+            --surface: rgba(22, 33, 50, .95);
+            --border: rgba(109, 133, 153, .6);
+            --accent: #b3ca30;
+            --green: #19a725;
+            --yellow: #d3bf0d;
+            --red: #b60909;
+            --purple: #801ddd;
+            --text: #cdd6f4;
+            --muted: #6c7086;
+        }
+
+        body {
+            background: var(--bg);
+            font-family: 'Share Tech Mono', monospace;
+            overflow: hidden;
+            color: var(--text);
+        }
+
+        #map {
+            position: fixed;
+            inset: 0;
+            z-index: 1;
+        }
+
+        /* Sidebar */
+        #sidebar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            width: 260px;
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            backdrop-filter: blur(10px);
+            overflow-y: auto;
+        }
+
+        #sidebar h1 {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 13px;
+            letter-spacing: 2px;
+            color: var(--accent);
+            text-transform: uppercase;
+            padding: 14px 14px 10px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .section {
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .section h2 {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 9px;
+            letter-spacing: 1.5px;
+            color: var(--muted);
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+
+        .tool-btn {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            padding: 7px 10px;
+            border-radius: 7px;
+            border: 1px solid transparent;
+            background: rgba(255, 255, 255, .05);
+            color: var(--muted);
+            cursor: pointer;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 11px;
+            text-align: left;
+            margin-bottom: 4px;
+            transition: .2s;
+        }
+
+        .tool-btn:hover {
+            background: rgba(255, 255, 255, .1);
+            color: var(--text);
+        }
+
+        .tool-btn.active {
+            border-color: currentColor;
+            background: rgba(255, 255, 255, .12);
+        }
+
+        .tool-btn .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .tool-btn.t-agent {
+            color: #3d78ff;
+        }
+
+        .tool-btn.t-target {
+            color: gold;
+        }
+
+        .tool-btn.t-patrol {
+            color: #a855f7;
+        }
+
+        .tool-btn.t-aggr {
+            color: #ef4444;
+        }
+
+        .tool-btn.t-erase {
+            color: var(--muted);
+        }
+
+        .count-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4px;
+            margin-top: 4px;
+        }
+
+        .count-item {
+            background: rgba(255, 255, 255, .06);
+            border-radius: 6px;
+            padding: 5px 8px;
+            font-size: 10px;
+        }
+
+        .count-item .label {
+            color: var(--muted);
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 2px;
+        }
+
+        .count-item .val {
+            font-size: 16px;
+            font-weight: 900;
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        .sb-input {
+            width: 100%;
+            padding: 6px 8px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: rgba(0, 0, 0, .4);
+            color: var(--text);
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 11px;
+            margin-bottom: 6px;
+        }
+
+        .sb-btn {
+            width: 100%;
+            padding: 8px;
+            border-radius: 7px;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, .07);
+            color: var(--text);
+            cursor: pointer;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 10px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+            transition: .2s;
+        }
+
+        .sb-btn:hover {
+            background: rgba(255, 255, 255, .14);
+        }
+
+        .sb-btn.green {
+            border-color: var(--green);
+            color: var(--green);
+        }
+
+        .sb-btn.green:hover {
+            background: rgba(25, 167, 37, .15);
+        }
+
+        .sb-btn.red {
+            border-color: var(--red);
+            color: var(--red);
+        }
+
+        .sb-btn.red:hover {
+            background: rgba(182, 9, 9, .15);
+        }
+
+        .sb-btn.accent {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .sb-btn.accent:hover {
+            background: rgba(179, 202, 48, .15);
+        }
+
+        select.sb-input option {
+            background: #1a2030;
+        }
+
+        #status-bar {
+            position: fixed;
+            bottom: 14px;
+            left: 270px;
+            right: 14px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 7px 14px;
+            z-index: 1000;
+            font-size: 11px;
+            color: var(--muted);
+            backdrop-filter: blur(8px);
+        }
+
+        .map-tiles {
+            filter: brightness(0.55) invert(1) contrast(1.1) hue-rotate(190deg) saturate(0.7);
+        }
+    </style>
+</head>
+
+<body>
+    <div id="map"></div>
+
+    <div id="sidebar">
+        <h1>SAR Editor</h1>
+
+        <div class="section">
+            <h2>Tool</h2>
+            <button class="tool-btn t-agent active" id="tb-agent" onclick="setTool('agent')">
+                <div class="dot" style="background:#3d78ff"></div> Agent Start
+            </button>
+            <button class="tool-btn t-target" id="tb-target" onclick="setTool('target')">
+                <div class="dot" style="background:gold"></div> Target
+            </button>
+            <button class="tool-btn t-patrol" id="tb-patrol" onclick="setTool('patrol')">
+                <div class="dot" style="background:#a855f7"></div> Patrol Enemy
+            </button>
+            <button class="tool-btn t-aggr" id="tb-aggr" onclick="setTool('aggressive')">
+                <div class="dot" style="background:#ef4444"></div> Aggressive Enemy
+            </button>
+            <button class="tool-btn t-erase" id="tb-erase" onclick="setTool('erase')">
+                <div class="dot" style="background:#6c7086"></div> Erase (click marker)
+            </button>
+        </div>
+
+        <div class="section">
+            <h2>Placements</h2>
+            <div class="count-grid">
+                <div class="count-item">
+                    <div class="label">Agents</div>
+                    <div class="val" id="cnt-agent">0</div>
+                </div>
+                <div class="count-item">
+                    <div class="label">Targets</div>
+                    <div class="val" id="cnt-target">0</div>
+                </div>
+                <div class="count-item">
+                    <div class="label">Patrol</div>
+                    <div class="val" id="cnt-patrol">0</div>
+                </div>
+                <div class="count-item">
+                    <div class="label">Aggr</div>
+                    <div class="val" id="cnt-aggr">0</div>
+                </div>
+            </div>
+            <br>
+            <button class="sb-btn red" onclick="clearAll()">Clear All</button>
+        </div>
+
+        <div class="section">
+            <h2>Scenario</h2>
+            <input class="sb-input" id="scen-name" type="text" placeholder="Scenario name…">
+            <button class="sb-btn green" onclick="saveScenario()">Save Scenario</button>
+            <select id="scen-load" class="sb-input">
+                <option value="">-- Load scenario --</option>
+            </select>
+            <button class="sb-btn" onclick="loadScenario()">Load Selected</button>
+            <button class="sb-btn" onclick="deleteScenario()">Delete Selected</button>
+        </div>
+
+        <div class="section">
+            <h2>Deploy</h2>
+            <button class="sb-btn accent" onclick="deployCustom()">Deploy Custom Mission</button>
+            <a href="index.html" class="sb-btn"
+                style="display:block;text-align:center;text-decoration:none;margin-top:4px;">← Back to Control</a>
+        </div>
+    </div>
+
+    <div id="status-bar">Click map to place entity • Current tool: <span id="cur-tool">Agent Start</span></div>
+
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script>
+        const API = 'http://127.0.0.1:8000';
+        const map = L.map('map', { zoomControl: false }).setView([38.900, 22.433], 15);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, className: 'map-tiles' }).addTo(map);
+        L.control.zoom({ position: 'topright' }).addTo(map);
+
+        const TOOL_META = {
+            agent: { label: 'Agent Start', color: '#3d78ff', radius: 10 },
+            target: { label: 'Target', color: 'gold', radius: 9 },
+            patrol: { label: 'Patrol Enemy', color: '#a855f7', radius: 8 },
+            aggressive: { label: 'Aggressive Enemy', color: '#ef4444', radius: 8 },
+            erase: { label: 'Erase Mode', color: '#6c7086', radius: 0 },
+        };
+
+        let currentTool = 'agent';
+        let placements = [];    // { type, lat, lon, marker, idx }
+
+        function setTool(tool) {
+            currentTool = tool;
+            document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(`tb-${tool === 'aggressive' ? 'aggr' : tool}`).classList.add('active');
+            document.getElementById('cur-tool').textContent = TOOL_META[tool].label;
+            map.getContainer().style.cursor = tool === 'erase' ? 'not-allowed' : 'crosshair';
+        }
+
+        function updateCounts() {
+            ['agent', 'target', 'patrol', 'aggressive'].forEach(t => {
+                const key = t === 'aggressive' ? 'aggr' : t;
+                document.getElementById(`cnt-${key}`).textContent =
+                    placements.filter(p => p.type === t).length;
+            });
+        }
+
+        function placeMarker(lat, lon, type, remoteIdx) {
+            const meta = TOOL_META[type];
+            const marker = L.circleMarker([lat, lon], {
+                radius: meta.radius, color: meta.color,
+                fillColor: meta.color, fillOpacity: 0.9, weight: 2
+            }).addTo(map).bindTooltip(meta.label);
+            const entry = { type, lat, lon, marker, remoteIdx };
+            placements.push(entry);
+            marker.on('click', (e) => {
+                L.DomEvent.stopPropagation(e);
+                if (currentTool === 'erase') eraseMarker(entry);
+            });
+            updateCounts();
+            return entry;
+        }
+
+        function eraseMarker(entry) {
+            map.removeLayer(entry.marker);
+            placements = placements.filter(p => p !== entry);
+            // Tell backend to remove by re-syncing
+            syncEditorState();
+            updateCounts();
+        }
+
+        async function syncEditorState() {
+            // POST all current placements to backend (clear + re-place)
+            try {
+                await fetch(`${API}/api/editor/clear`, { method: 'POST' });
+                for (const p of placements) {
+                    await fetch(`${API}/api/editor/place`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ type: p.type, lat: p.lat, lon: p.lon })
+                    });
+                }
+            } catch (e) { }
+        }
+
+        map.on('click', async (e) => {
+            if (currentTool === 'erase') return;
+            const { lat, lng: lon } = e.latlng;
+            try {
+                const res = await fetch(`${API}/api/editor/place`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: currentTool, lat, lon })
+                });
+                const d = await res.json();
+                placeMarker(lat, lon, currentTool, d.count - 1);
+            } catch (ex) {
+                document.getElementById('status-bar').textContent = 'Backend offline — marker placed locally';
+                placeMarker(lat, lon, currentTool, placements.length);
+            }
+        });
+
+        function clearAll() {
+            placements.forEach(p => map.removeLayer(p.marker));
+            placements = [];
+            updateCounts();
+            fetch(`${API}/api/editor/clear`, { method: 'POST' }).catch(() => { });
+        }
+
+        async function saveScenario() {
+            const name = document.getElementById('scen-name').value.trim();
+            if (!name) { alert('Enter a scenario name'); return; }
+            await syncEditorState();
+            try {
+                const r = await fetch(`${API}/api/scenario/save`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, params: {} })
+                });
+                const d = await r.json();
+                alert(`Saved: "${d.name}"`);
+                loadScenarioList();
+            } catch (e) { alert('Save failed'); }
+        }
+
+        async function loadScenario() {
+            const sel = document.getElementById('scen-load').value;
+            if (!sel) { alert('Select a scenario first'); return; }
+            try {
+                const r = await fetch(`${API}/api/scenario/load`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: sel })
+                });
+                const d = await r.json();
+                // Clear local markers
+                placements.forEach(p => map.removeLayer(p.marker));
+                placements = [];
+                (d.placements || []).forEach((p, i) => placeMarker(p.lat, p.lon, p.type, i));
+                if (d.placements && d.placements.length > 0) {
+                    const first = d.placements[0];
+                    map.panTo([first.lat, first.lon]);
+                }
+            } catch (e) { alert('Load failed'); }
+        }
+
+        async function deleteScenario() {
+            const sel = document.getElementById('scen-load').value;
+            if (!sel) { alert('Select a scenario first'); return; }
+            if (!confirm(`Delete scenario "${sel}"?`)) return;
+            try {
+                await fetch(`${API}/api/scenario/delete?name=${encodeURIComponent(sel)}`, { method: 'DELETE' });
+                loadScenarioList();
+            } catch (e) { }
+        }
+
+        async function deployCustom() {
+            await syncEditorState();
+            window.location.href = 'index.html';
+            // Signal to index.html to use mode=custom — user clicks Deploy Mission there
+            localStorage.setItem('sar_deploy_mode', 'custom');
+            alert('Editor state saved. In Mission Control, click "Deploy Mission" to launch with these placements.\n(Tip: The Deploy button will use your exact placements.)');
+        }
+
+        async function loadScenarioList() {
+            try {
+                const d = await (await fetch(`${API}/api/scenario/list`)).json();
+                const sel = document.getElementById('scen-load');
+                const cur = sel.value;
+                sel.innerHTML = '<option value="">-- Load scenario --</option>';
+                (d.scenarios || []).forEach(s => {
+                    const opt = document.createElement('option');
+                    opt.value = s.name; opt.textContent = s.name;
+                    if (s.name === cur) opt.selected = true;
+                    sel.appendChild(opt);
+                });
+            } catch (e) { }
+        }
+
+        // Load existing editor state from backend on open
+        async function loadEditorState() {
+            try {
+                const d = await (await fetch(`${API}/api/editor/state`)).json();
+                (d.placements || []).forEach((p, i) => placeMarker(p.lat, p.lon, p.type, i));
+            } catch (e) { }
+        }
+
+        loadEditorState();
+        loadScenarioList();
+        setTool('agent');
+    </script>
+</body>
+
+</html>

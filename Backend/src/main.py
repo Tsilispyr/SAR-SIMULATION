@@ -40,10 +40,11 @@ logging.getLogger("uvicorn.access").addFilter(EndpointFilter())
 ox.settings.use_cache = True
 ox.settings.cache_folder = '/app/data/osmnx_cache'
 
-STATS_DIR   = '/app/data/stats'
-ROBOT_SPEED = 6.0   # m/s autonomous movement speed
-TICK_RATE   = 0.2   # seconds per simulation tick (5 Hz)
-sim_speed_multiplier: float = 1.0  # adjustable via /api/sim/speed
+STATS_DIR     = '/app/data/stats'
+SCENARIOS_DIR = '/app/data/scenarios'
+ROBOT_SPEED   = 6.0
+TICK_RATE     = 0.2
+sim_speed_multiplier: float = 1.0
 
 _sim_lock = threading.Lock()  # protects game_logic from concurrent writes
 
@@ -64,14 +65,15 @@ class VectorPathRequest(BaseModel):
 # --- 4. GAME LOGIC CLASSES ---
 
 class Enemy:
-    def __init__(self, _id, enemy_type, start_node, G, cx, cy, patrol_speed=2.5, aggr_speed=4.5):
+    def __init__(self, _id, enemy_type, start_node, G, cx, cy,
+                 patrol_speed=2.5, aggr_speed=4.5, detection_radius=50.0):
         self.id = _id
-        self.type = "patrol"         # current state
-        self.base_type = enemy_type  # 'patrol' or 'aggressive'
+        self.type = "patrol"
+        self.base_type = enemy_type
         self.G = G.to_undirected() if G.is_directed() else G
         self.cx = cx
         self.cy = cy
-        self.detection_radius = 50.0
+        self.detection_radius = detection_radius
         self.patrol_speed = patrol_speed
         self.aggr_speed   = aggr_speed
         self.speed        = patrol_speed
@@ -171,6 +173,37 @@ class Enemy:
                 self.x += dir_x * move_dist_remaining
                 self.y += dir_y * move_dist_remaining
                 move_dist_remaining = 0
+
+
+# ---------------------------------------------------------------------------
+#  PER-AGENT STATE
+# ---------------------------------------------------------------------------
+AGENT_COLORS = ['#3d78ff', '#22c55e', '#f97316', '#e879f9']
+
+class AgentState:
+    """Encapsulates one autonomous agent's position, path, and score."""
+    def __init__(self, agent_id: int, start_node, G, cx: float, cy: float,
+                 speed_ms: float = 6.0):
+        self.id              = agent_id
+        self.color           = AGENT_COLORS[agent_id % 4]
+        n                    = G.nodes[start_node]
+        self.robot_x         = round(n['x'] - cx, 2)
+        self.robot_y         = round(n['y'] - cy, 2)
+        self.robot_node      = start_node
+        self.robot_speed_ms  = speed_ms
+        self.robot_auto_path = []
+        self.current_target_id: int | None = None
+        self.escape_mode     = False
+        self.replan_timer    = 0
+        self.last_decision   = "Initialising..."
+        self._last_robot_node = None
+        self.score           = 0
+        self.escape_events   = 0
+        self.terrain_penalty = 0
+        self.targets_collected = 0
+        self.dead_ends       = set()
+        self.active          = True   # False when incapacitated by contact
+        self.assigned_target_id = None  # greedy pre-assignment hint
 
 
 # ---------------------------------------------------------------------------
@@ -279,7 +312,7 @@ def densify_path(path_coords, step_meters=2.0):
     return new_path
 
 
-def save_stats_to_disk(stats_history, score, status):
+def save_stats_to_disk(stats_history, score, status, n_agents=1):
     """Persist mission stats to /app/data/stats/<timestamp>.json"""
     try:
         os.makedirs(STATS_DIR, exist_ok=True)
@@ -289,6 +322,7 @@ def save_stats_to_disk(stats_history, score, status):
                 "timestamp": time.time(),
                 "final_score": score,
                 "final_status": status,
+                "n_agents": n_agents,
                 "history": stats_history
             }, f)
         print(f"{C.OK}[STATS] Saved to {filename}{C.END}")
@@ -302,322 +336,331 @@ def save_stats_to_disk(stats_history, score, status):
 
 class SARGameState:
     def __init__(self):
-        self.enemies            = []
-        self.targets            = []
-        self.targets_total      = 0
-        self.score              = 0
-        self.game_over          = False
-        self.status_message     = "Active"
+        self.enemies              = []
+        self.targets              = []
+        self.targets_total        = 0
+        self.game_over            = False
+        self.status_message       = "Active"
         self._proximity_cooldowns = {}
-        self.stats_history      = []
-        self.mission_elapsed    = 0.0
-        self.stats_saved        = False
-
-        # Autonomous robot state
-        self.robot_x            = 0.0
-        self.robot_y            = 0.0
-        self.robot_node         = None
-        self.robot_auto_path    = []
-        self.current_target_id  = None
-        self.escape_mode        = False
-        self.replan_timer       = 0.0
-        self.last_decision      = "Waiting for mission start..."
-        self.dead_ends          = set()
-
-        # Terrain penalty tracking
-        self._last_robot_node   = None
-
+        self.stats_history        = []
+        self.mission_elapsed      = 0.0
+        self.stats_saved          = False
+        self.agents: list         = []   # list[AgentState]
+        self.dead_ends            = set()
         # Simulation control
-        self.last_telemetry_time = 0.0  # set by Godot telemetry; 0 → self-driven
-        self.sim_running        = False  # mission doesn't start until /api/sim/start
-        self.sim_paused         = False
-        self.robot_speed_ms     = 6.0   # m/s; configurable via /api/map/vector agent_speed
-        self._spawn_snapshot    = None  # set by spawn_objects for restart
+        self.last_telemetry_time  = 0.0
+        self.sim_running          = False
+        self.sim_paused           = False
+        self.robot_speed_ms       = 6.0
+        self._spawn_snapshot      = None
+
+    # ------------------------------------------------------------------
+    @property
+    def score(self):
+        """Total score = sum of all agent scores."""
+        return sum(a.score for a in self.agents) if self.agents else 0
+
+    @property
+    def escape_mode(self):
+        return any(a.escape_mode for a in self.agents)
+
+    @property
+    def last_decision(self):
+        if not self.agents:
+            return "Waiting for mission start..."
+        return self.agents[0].last_decision
 
     # ------------------------------------------------------------------
     def spawn_objects(self, G, cx, cy, n_patrol=3, n_aggressive=2, n_targets=5,
-                      patrol_speed=2.5, aggr_speed=4.5):
+                      patrol_speed=2.5, aggr_speed=4.5, n_agents=1,
+                      agent_speed=6.0, detection_radius=50.0,
+                      custom_placements=None):
+        """Spawn all entities. custom_placements overrides random when mode=custom."""
         self.enemies.clear()
         self.targets.clear()
-        self.score              = 0
-        self.game_over          = False
-        self.status_message     = "Mission Start"
+        self.agents.clear()
+        self.game_over            = False
+        self.status_message       = "Mission Start"
         self._proximity_cooldowns = {}
-        self.stats_history      = []
-        self.mission_elapsed    = 0.0
-        self.stats_saved        = False
-        self.robot_auto_path    = []
-        self.current_target_id  = None
-        self.escape_mode        = False
-        self.replan_timer       = 0.0
-        self.last_decision      = "Selecting first target..."
-        self._last_robot_node   = None
-        self.dead_ends          = compute_dead_ends(G)
-        self.last_telemetry_time = 0.0  # reset so self-drive loop takes over
+        self.stats_history        = []
+        self.mission_elapsed      = 0.0
+        self.stats_saved          = False
+        self.dead_ends            = compute_dead_ends(G)
+        self.last_telemetry_time  = 0.0
+        self.robot_speed_ms       = agent_speed
 
         all_nodes = list(G.nodes())
-        if len(all_nodes) > n_targets:
-            target_nodes = random.sample(all_nodes, n_targets)
-            for i, node in enumerate(target_nodes):
-                n = G.nodes[node]
-                self.targets.append({
-                    "id": i,
-                    "x": round(n['x'] - cx, 2),
-                    "y": round(n['y'] - cy, 2),
-                    "node": node
-                })
+
+        if custom_placements:
+            # ── Custom editor placements ──
+            for p in custom_placements:
+                nnode = ox.distance.nearest_nodes(G, p['lon_proj'], p['lat_proj'])
+                if p['type'] == 'target':
+                    nn = G.nodes.get(nnode, {})
+                    self.targets.append({
+                        'id': len(self.targets),
+                        'x': round(nn['x'] - cx, 2),
+                        'y': round(nn['y'] - cy, 2),
+                        'node': nnode
+                    })
+                elif p['type'] in ('patrol', 'aggressive'):
+                    self.enemies.append(
+                        Enemy(len(self.enemies), p['type'], nnode, G, cx, cy,
+                              patrol_speed, aggr_speed, detection_radius))
+            # Spawn agents at specified positions (or random if none given)
+            agent_placements = [p for p in custom_placements if p['type'] == 'agent']
+            all_agent_nodes = [ox.distance.nearest_nodes(
+                G, p['lon_proj'], p['lat_proj']) for p in agent_placements]
+            while len(all_agent_nodes) < n_agents:
+                all_agent_nodes.append(random.choice(all_nodes))
+            for aid in range(n_agents):
+                ag = AgentState(aid, all_agent_nodes[aid], G, cx, cy, agent_speed)
+                ag.dead_ends = self.dead_ends
+                self.agents.append(ag)
         else:
-            target_nodes = []
+            # ── Random placement ──
+            if len(all_nodes) > n_targets:
+                target_nodes = random.sample(all_nodes, n_targets)
+                for i, node in enumerate(target_nodes):
+                    n = G.nodes[node]
+                    self.targets.append({
+                        'id': i,
+                        'x': round(n['x'] - cx, 2),
+                        'y': round(n['y'] - cy, 2),
+                        'node': node
+                    })
+            else:
+                target_nodes = []
+
+            available = [n for n in all_nodes if n not in target_nodes]
+            total_enemies = n_patrol + n_aggressive
+            if len(available) > total_enemies + n_agents:
+                enemy_nodes = random.sample(available, total_enemies)
+                for i in range(n_patrol):
+                    self.enemies.append(Enemy(i, 'patrol', enemy_nodes[i], G, cx, cy,
+                                              patrol_speed, aggr_speed, detection_radius))
+                for i in range(n_aggressive):
+                    idx = n_patrol + i
+                    self.enemies.append(Enemy(idx, 'aggressive', enemy_nodes[idx], G, cx, cy,
+                                              patrol_speed, aggr_speed, detection_radius))
+                remaining = [n for n in available if n not in enemy_nodes]
+                agent_starts = random.sample(remaining, min(n_agents, len(remaining)))
+                while len(agent_starts) < n_agents:
+                    agent_starts.append(random.choice(all_nodes))
+            else:
+                agent_starts = random.sample(all_nodes, min(n_agents, len(all_nodes)))
+
+            for aid in range(n_agents):
+                ag = AgentState(aid, agent_starts[aid], G, cx, cy, agent_speed)
+                ag.dead_ends = self.dead_ends
+                self.agents.append(ag)
 
         self.targets_total = len(self.targets)
+        # Greedy distinct target pre-assignment
+        self._assign_targets_to_agents(G)
 
-        available_nodes = [n for n in all_nodes if n not in target_nodes]
-        total_enemies   = n_patrol + n_aggressive
-        if len(available_nodes) > total_enemies:
-            enemy_nodes = random.sample(available_nodes, total_enemies)
-            for i in range(n_patrol):
-                self.enemies.append(Enemy(i, "patrol", enemy_nodes[i], G, cx, cy, patrol_speed, aggr_speed))
-                print(f"{C.ENEMY}[SPAWN] Enemy-{i} PATROL | speed={patrol_speed}{C.END}")
-            for i in range(n_aggressive):
-                idx = n_patrol + i
-                self.enemies.append(Enemy(idx, "aggressive", enemy_nodes[idx], G, cx, cy, patrol_speed, aggr_speed))
-                print(f"{C.ENEMY}[SPAWN] Enemy-{idx} AGGRESSIVE | patrol={patrol_speed}/aggr={aggr_speed}{C.END}")
-
-        # Save spawn snapshot for restart
         self._spawn_snapshot = {
-            "enemies":  [{"id": e.id, "base_type": e.base_type,
-                          "node": e.current_node,
-                          "patrol_speed": patrol_speed, "aggr_speed": aggr_speed}
-                         for e in self.enemies],
-            "targets":  [{"id": t["id"], "x": t["x"], "y": t["y"],
-                          "node": t["node"]} for t in self.targets],
-            "robot":    {"x": 0.0, "y": 0.0},
+            'enemies': [{'id': e.id, 'base_type': e.base_type, 'node': e.current_node,
+                         'patrol_speed': patrol_speed, 'aggr_speed': aggr_speed,
+                         'detection_radius': detection_radius}
+                        for e in self.enemies],
+            'targets': [dict(t) for t in self.targets],
+            'agents':  [{'id': a.id, 'node': a.robot_node, 'speed': a.robot_speed_ms}
+                        for a in self.agents],
         }
-        self.sim_running = False   # must call /api/sim/start to begin
+        self.sim_running = False
         self.sim_paused  = False
+        print(f"{C.OK}[SPAWN] {len(self.agents)} agent(s), {len(self.targets)} targets, "
+              f"{len(self.enemies)} enemies{C.END}")
+
+    def _assign_targets_to_agents(self, G):
+        """Greedily pre-assign distinct targets to agents (closest unassigned first)."""
+        assigned = set()
+        # Sort agents by id for determinism
+        for ag in self.agents:
+            best_t, best_cost = None, float('inf')
+            for t in self.targets:
+                if t['id'] in assigned:
+                    continue
+                dx = t['x'] - ag.robot_x
+                dy = t['y'] - ag.robot_y
+                cost = math.hypot(dx, dy)
+                if cost < best_cost:
+                    best_cost = cost
+                    best_t = t
+            if best_t is None and self.targets:
+                best_t = self.targets[0]  # all assigned, share
+            if best_t:
+                ag.assigned_target_id = best_t['id']
+                assigned.add(best_t['id'])
 
     # ------------------------------------------------------------------
-    # ADVANCE ROBOT (called by background simulation loop)
+    # ADVANCE AGENT (called by background simulation loop per agent)
     # ------------------------------------------------------------------
-    def advance_robot(self, delta_t: float):
-        """Move robot_x/robot_y along robot_auto_path at self.robot_speed_ms m/s."""
-        if not self.robot_auto_path:
+    def advance_agent(self, ag: AgentState, delta_t: float):
+        """Move agent along its path at agent.robot_speed_ms m/s."""
+        if not ag.robot_auto_path:
             return
-        dist_to_move = self.robot_speed_ms * delta_t
-        while self.robot_auto_path and dist_to_move > 0:
-            wp = self.robot_auto_path[0]
-            dx = wp['x'] - self.robot_x
-            dy = wp['y'] - self.robot_y
+        dist_to_move = ag.robot_speed_ms * delta_t
+        while ag.robot_auto_path and dist_to_move > 0:
+            wp = ag.robot_auto_path[0]
+            dx = wp['x'] - ag.robot_x
+            dy = wp['y'] - ag.robot_y
             d  = math.hypot(dx, dy)
-            if d < 0.3:                          # snap & pop
-                self.robot_x, self.robot_y = wp['x'], wp['y']
-                self.robot_auto_path.pop(0)
-            elif dist_to_move >= d:              # consume waypoint
-                self.robot_x, self.robot_y = wp['x'], wp['y']
-                self.robot_auto_path.pop(0)
+            if d < 0.3:
+                ag.robot_x, ag.robot_y = wp['x'], wp['y']
+                ag.robot_auto_path.pop(0)
+            elif dist_to_move >= d:
+                ag.robot_x, ag.robot_y = wp['x'], wp['y']
+                ag.robot_auto_path.pop(0)
                 dist_to_move -= d
-            else:                                # partial step
-                self.robot_x += (dx / d) * dist_to_move
-                self.robot_y += (dy / d) * dist_to_move
+            else:
+                ag.robot_x += (dx / d) * dist_to_move
+                ag.robot_y += (dy / d) * dist_to_move
                 dist_to_move = 0
 
     # ------------------------------------------------------------------
-    # ESCAPE PATH — flee to spot maximising dist(enemy→spot) − path_len(robot→spot)
+    # ESCAPE PATH (per-agent)
     # ------------------------------------------------------------------
-    def find_escape_path(self, G, robot_node, penalized_G, cx, cy):
-        """Return centred path coords leading away from threats, or [] if no threat."""
+    def find_escape_path(self, G, ag: AgentState, penalized_G, cx, cy):
         threatening = [e for e in self.enemies
-                       if e.base_type == "aggressive" and e.type == "aggressive"]
+                       if e.base_type == 'aggressive' and e.type == 'aggressive']
         if not threatening:
             return []
-
-        # Candidate escape nodes: BFS ring 2–8 hops from robot
+        robot_node = ag.robot_node
         candidates = set()
-        frontier = {robot_node}
-        visited  = {robot_node}
+        frontier = {robot_node}; visited = {robot_node}
         for hop in range(8):
-            next_frontier = set()
+            nxt = set()
             for n in frontier:
                 for nb in G.neighbors(n):
                     if nb not in visited:
-                        next_frontier.add(nb)
-                        visited.add(nb)
+                        nxt.add(nb); visited.add(nb)
             if hop >= 2:
-                candidates |= next_frontier
-            frontier = next_frontier
+                candidates |= nxt
+            frontier = nxt
             if not frontier:
                 break
-
         if not candidates:
             return []
-
-        best_score = -999999.0
-        best_node  = None
+        best_score, best_node = -999999.0, None
         for cand in candidates:
-            # Node coords are projected (absolute); enemy coords are centred-relative
-            cx_n = G.nodes[cand]['x']
-            cy_n = G.nodes[cand]['y']
+            cx_n, cy_n = G.nodes[cand]['x'], G.nodes[cand]['y']
             enemy_turns = min(
-                (math.hypot((cx_n - cx) - e.x, (cy_n - cy) - e.y) / max(e.speed, 0.1))
-                for e in threatening
-            )
+                math.hypot((cx_n - cx) - e.x, (cy_n - cy) - e.y) / max(e.speed, 0.1)
+                for e in threatening)
             try:
                 path_len = nx.shortest_path_length(penalized_G, robot_node, cand, weight='length')
             except:
                 continue
-            score = enemy_turns - (path_len / 4.0)
-            if score > best_score:
-                best_score = score
-                best_node  = cand
-
+            sc = enemy_turns - path_len / 4.0
+            if sc > best_score:
+                best_score = sc; best_node = cand
         if best_node is None:
             return []
         try:
             node_path = nx.shortest_path(penalized_G, robot_node, best_node, weight='length')
-            coords = _extract_path_coords_centred(G, node_path, cx, cy)
-            return densify_path(coords, 2.0)
+            return densify_path(_extract_path_coords_centred(G, node_path, cx, cy), 2.0)
         except:
             return []
 
     # ------------------------------------------------------------------
-    # BRAVE PATH — proceed to nearest target if we'll arrive before the enemy
+    # BRAVE PATH (per-agent)
     # ------------------------------------------------------------------
-    def find_brave_path(self, G, robot_node, target, cx, cy):
-        """Return centred path to target only if robot arrives SAFELY before aggressive enemies.
-
-        'Safely' means robot_steps + safety_margin < enemy_steps (margin = 1 step).
-        Routes on the penalized G (passed as G) so the path naturally avoids enemies.
-        Only aggressive enemies in active-chase mode are considered a disqualifying threat.
-        Patrol enemies affect path cost via the penalized graph but don't veto the route.
-        """
+    def find_brave_path(self, G, ag: AgentState, target, cx, cy):
         threatening = [e for e in self.enemies
-                       if e.base_type == "aggressive" and e.type == "aggressive"]
+                       if e.base_type == 'aggressive' and e.type == 'aggressive']
         target_node = target['node']
-
-        # Dead-end guard — skip targets that are dead-ends
+        robot_node  = ag.robot_node
         try:
             if G.degree(target_node) <= 1:
-                return []  # dead-end target — too risky
+                return []
         except:
             pass
-
         try:
-            # Route via penalized graph (avoids enemy zones)
             node_path   = nx.shortest_path(G, robot_node, target_node, weight='length')
             robot_steps = nx.shortest_path_length(G, robot_node, target_node, weight='length')
         except:
             return []
-
-        SAFETY_MARGIN = 1  # robot must arrive at least 1 step ahead
         for e in threatening:
             try:
-                e_node = ox.distance.nearest_nodes(
-                    current_map_data["G_proj"], e.x + cx, e.y + cy)
+                e_node = ox.distance.nearest_nodes(current_map_data['G_proj'], e.x + cx, e.y + cy)
                 enemy_steps = nx.shortest_path_length(
-                    current_map_data["G_proj"], e_node, target_node, weight='length')
+                    current_map_data['G_proj'], e_node, target_node, weight='length')
             except:
                 enemy_steps = 999999
-
-            if robot_steps + SAFETY_MARGIN >= enemy_steps:
-                return []  # enemy arrives too close behind us — abort
-
-        coords = _extract_path_coords_centred(current_map_data["G_proj"], node_path, cx, cy)
+            if robot_steps + 1 >= enemy_steps:
+                return []
+        coords = _extract_path_coords_centred(current_map_data['G_proj'], node_path, cx, cy)
         return densify_path(coords, 2.0)
 
     # ------------------------------------------------------------------
-    # AUTONOMOUS RE-ROUTING — called every tick; replans when needed
+    # AUTONOMOUS RE-ROUTING (per-agent)
     # ------------------------------------------------------------------
-    REPLAN_INTERVAL = 5  # ticks between full replans
+    REPLAN_INTERVAL = 5
 
-    def autonomous_replan(self, G, robot_node, cx, cy):
-        """Choose best target, compute escape/brave/normal path, update robot_auto_path."""
-        self.replan_timer += 1
-        if self.replan_timer < self.REPLAN_INTERVAL and self.robot_auto_path:
-            return  # still following existing path, not time to replan yet
-
-        self.replan_timer = 0
-
+    def autonomous_replan(self, G, ag: AgentState, cx, cy):
+        ag.replan_timer += 1
+        if ag.replan_timer < self.REPLAN_INTERVAL and ag.robot_auto_path:
+            return
+        ag.replan_timer = 0
         if not self.targets:
             return
 
         penalized_G = build_penalized_graph(G, self.enemies, cx, cy)
-        # Store centre on penalized graph (may still be needed for debug reads)
-        penalized_G.graph['center_x_raw'] = cx
-        penalized_G.graph['center_y_raw'] = cy
-
-        # --- Check escape condition ---
-        threatening = [e for e in self.enemies
-                       if e.base_type == "aggressive" and e.type == "aggressive"]
+        threatening  = [e for e in self.enemies
+                        if e.base_type == 'aggressive' and e.type == 'aggressive']
         if threatening:
-            nearest_threat_dist = min(
-                math.hypot(e.x - self.robot_x, e.y - self.robot_y)
-                for e in threatening
-            )
-            if nearest_threat_dist < 1.2 * self.enemies[0].detection_radius:
-                # Try brave first
-                best_t = self._pick_best_target(penalized_G, robot_node)
+            nearest_dist = min(
+                math.hypot(e.x - ag.robot_x, e.y - ag.robot_y) for e in threatening)
+            det_r = self.enemies[0].detection_radius if self.enemies else 50.0
+            if nearest_dist < 1.2 * det_r:
+                best_t = self._pick_best_target(penalized_G, ag)
                 if best_t:
-                    brave = self.find_brave_path(penalized_G, robot_node, best_t, cx, cy)
+                    brave = self.find_brave_path(penalized_G, ag, best_t, cx, cy)
                     if brave:
-                        self.robot_auto_path = brave
-                        self.escape_mode     = False
-                        self.current_target_id = best_t['id']
-                        self.last_decision = (
-                            f"BRAVE: heading to T{best_t['id']} despite threat "
-                            f"({nearest_threat_dist:.0f}m)"
-                        )
-                        print(f"{C.AGENT}[AUTO] {self.last_decision}{C.END}")
+                        ag.robot_auto_path   = brave
+                        ag.escape_mode       = False
+                        ag.current_target_id = best_t['id']
+                        ag.last_decision     = (f"BRAVE: T{best_t['id']} ({nearest_dist:.0f}m threat)")
                         return
-
-                # Escape
-                escape = self.find_escape_path(G, robot_node, penalized_G, cx, cy)
-                if escape:
-                    self.robot_auto_path   = escape
-                    self.escape_mode       = True
-                    self.current_target_id = None
-                    self.last_decision     = (
-                        f"ESCAPE: fleeing threat "
-                        f"({nearest_threat_dist:.0f}m to nearest aggressive)"
-                    )
-                    print(f"{C.AGENT}[AUTO] {self.last_decision}{C.END}")
+                esc = self.find_escape_path(G, ag, penalized_G, cx, cy)
+                if esc:
+                    ag.robot_auto_path   = esc
+                    ag.escape_mode       = True
+                    ag.current_target_id = None
+                    ag.escape_events     += 1
+                    ag.last_decision     = (f"ESCAPE: fleeing ({nearest_dist:.0f}m)")
                     return
 
-        # --- Normal: pick lowest cost target ---
-        best_t = self._pick_best_target(penalized_G, robot_node)
+        best_t = self._pick_best_target(penalized_G, ag)
         if not best_t:
             return
-
-        if best_t['id'] == self.current_target_id and self.robot_auto_path:
-            return  # already on the right path
-
+        if best_t['id'] == ag.current_target_id and ag.robot_auto_path:
+            return
         try:
-            node_path = nx.shortest_path(penalized_G, robot_node, best_t['node'], weight='length')
-            coords    = _extract_path_coords_centred(G, node_path, cx, cy)
-            self.robot_auto_path = densify_path(coords, 2.0)
-            self.escape_mode     = False
-            self.current_target_id = best_t['id']
-            self.last_decision   = (
-                f"Targeting T{best_t['id']} at ({best_t['x']:.0f},{best_t['y']:.0f}) "
-                f"| path pts: {len(self.robot_auto_path)} | escape_mode: OFF"
-            )
-            print(f"{C.AGENT}[AUTO] {self.last_decision}{C.END}")
+            node_path = nx.shortest_path(penalized_G, ag.robot_node, best_t['node'], weight='length')
+            ag.robot_auto_path   = densify_path(_extract_path_coords_centred(G, node_path, cx, cy), 2.0)
+            ag.escape_mode       = False
+            ag.current_target_id = best_t['id']
+            ag.last_decision     = (f"Targeting T{best_t['id']} | pts:{len(ag.robot_auto_path)}")
+            print(f"{C.AGENT}[A{ag.id}] {ag.last_decision}{C.END}")
         except Exception as e:
-            print(f"{C.ERR}[AUTO] pathfinding failed: {e}{C.END}")
+            print(f"{C.ERR}[A{ag.id}] replan failed: {e}{C.END}")
 
-    def _pick_best_target(self, penalized_G, robot_node):
-        """Return target dict with lowest A* cost from robot_node."""
-        best_t    = None
-        best_cost = float('inf')
-        # Apply dead-end penalty to penalized_G temporarily
+    def _pick_best_target(self, penalized_G, ag: AgentState):
+        """Pick lowest-cost target; prefer assigned target to avoid collision with other agents."""
+        best_t, best_cost = None, float('inf')
         for t in self.targets:
             try:
-                cost = nx.shortest_path_length(penalized_G, robot_node, t['node'], weight='length')
-                # Dead-end penalty: +200 if target node is a dead-end
-                if t['node'] in self.dead_ends:
+                cost = nx.shortest_path_length(penalized_G, ag.robot_node, t['node'], weight='length')
+                if t['node'] in ag.dead_ends:
                     cost += 200
+                # Bonus for pre-assigned target to guide agents apart
+                if t['id'] == ag.assigned_target_id:
+                    cost -= cost * 0.15  # 15% preference discount
                 if cost < best_cost:
-                    best_cost = cost
-                    best_t    = t
+                    best_cost = cost; best_t = t
             except:
                 pass
         return best_t
@@ -625,102 +668,112 @@ class SARGameState:
     # ------------------------------------------------------------------
     # MAIN UPDATE LOOP
     # ------------------------------------------------------------------
-    def update(self, robot_x, robot_y, robot_node, G, delta_t):
+    def update(self, G, delta_t, cx, cy):
+        """Tick all agents, move enemies, check collisions and mission state."""
         if self.game_over:
             return
 
-        self.robot_x    = robot_x
-        self.robot_y    = robot_y
-        self.robot_node = robot_node
         self.mission_elapsed += delta_t
 
-        # Record time-series snapshot
-        self.stats_history.append({
-            "t":       round(self.mission_elapsed, 1),
-            "score":   self.score,
-            "targets": len(self.targets)
-        })
+        # Per-agent terrain, target collection, path pruning, replan
+        for ag in self.agents:
+            if not ag.active:
+                continue
 
-        # --- Terrain penalty for current edge ---
-        if self._last_robot_node is not None and robot_node != self._last_robot_node:
-            edge_data = G.get_edge_data(self._last_robot_node, robot_node)
-            if edge_data:
-                data = min(edge_data.values(), key=lambda x: x.get('length', 999999))
-                hw   = data.get('highway', '')
-                if isinstance(hw, list):
-                    hw = hw[0]
-                penalty = HIGHWAY_SCORE_PENALTY.get(hw, 0)
-                if penalty:
-                    self.score -= penalty
-                    print(f"{C.WARN}[TERRAIN] Node transition on '{hw}' road → score −{penalty} | Score: {self.score}{C.END}")
-        self._last_robot_node = robot_node
+            # Terrain penalty
+            if ag._last_robot_node is not None and ag.robot_node != ag._last_robot_node:
+                edge_data = G.get_edge_data(ag._last_robot_node, ag.robot_node)
+                if edge_data:
+                    data = min(edge_data.values(), key=lambda x: x.get('length', 999999))
+                    hw = data.get('highway', '')
+                    if isinstance(hw, list): hw = hw[0]
+                    penalty = HIGHWAY_SCORE_PENALTY.get(hw, 0)
+                    if penalty:
+                        ag.score -= penalty
+                        ag.terrain_penalty += penalty
+            ag._last_robot_node = ag.robot_node
 
-        # --- Target collection ---
-        for t in self.targets[:]:
-            dist = math.sqrt((t['x'] - robot_x)**2 + (t['y'] - robot_y)**2)
-            if dist < 8.0:
-                self.targets.remove(t)
-                self.score += 50
-                if self.current_target_id == t['id']:
-                    self.current_target_id = None
-                    self.robot_auto_path   = []  # trigger replan
-                print(f"{C.OK}[SCORE] Target #{t['id']} Collected! Score:{self.score} Remaining:{len(self.targets)}{C.END}")
+            # Target collection (any agent collects = removed for all)
+            for t in self.targets[:]:
+                dist = math.hypot(t['x'] - ag.robot_x, t['y'] - ag.robot_y)
+                if dist < 8.0:
+                    self.targets.remove(t)
+                    ag.score += 50
+                    ag.targets_collected += 1
+                    if ag.current_target_id == t['id']:
+                        ag.current_target_id  = None
+                        ag.robot_auto_path    = []
+                    # Reset assigned hint for ALL agents to force re-assignment
+                    for other in self.agents:
+                        if other.assigned_target_id == t['id']:
+                            other.assigned_target_id = None
+                    self._assign_targets_to_agents(G)
+                    print(f"{C.OK}[A{ag.id}] Target #{t['id']} collected! Remaining:{len(self.targets)}{C.END}")
 
-        # --- Mission success ---
+            # Path pruning
+            while ag.robot_auto_path:
+                wp = ag.robot_auto_path[0]
+                if math.hypot(wp['x'] - ag.robot_x, wp['y'] - ag.robot_y) < 5.0:
+                    ag.robot_auto_path.pop(0)
+                else:
+                    break
+
+            # Replan
+            self.autonomous_replan(G, ag, cx, cy)
+
+        # Record time-series snapshot (per-agent score keys for chart lookup)
+        snap = {
+            't':       round(self.mission_elapsed, 1),
+            'score':   self.score,
+            'targets': len(self.targets),
+            'agents':  [{'id': a.id, 'score': a.score, 'escape': a.escape_mode}
+                        for a in self.agents]
+        }
+        for a in self.agents:
+            snap[f'score_{a.id}'] = a.score
+        self.stats_history.append(snap)
+
+        # Mission success
         if not self.targets:
-            self.status_message = "MISSION SUCCESS!"
-            self.game_over      = True
-            print(f"{C.OK}[GAME] MISSION SUCCESS! Final Score: {self.score}{C.END}")
+            self.status_message = 'MISSION SUCCESS!'
+            self.game_over = True
             if not self.stats_saved:
-                save_stats_to_disk(self.stats_history, self.score, self.status_message)
+                save_stats_to_disk(self.stats_history, self.score,
+                                   self.status_message, len(self.agents))
                 self.stats_saved = True
             return
 
-        # --- Enemy movement & contact ---
-        for enemy in self.enemies:
-            enemy.move(robot_node, robot_x, robot_y, delta_t)
+        # Enemy movement & contact
+        active_agents = [a for a in self.agents if a.active]
+        all_incapacitated = True
+        for ag in active_agents:
+            for enemy in self.enemies:
+                enemy.move(ag.robot_node, ag.robot_x, ag.robot_y, delta_t)
+                dist = math.hypot(enemy.x - ag.robot_x, enemy.y - ag.robot_y)
+                warn_key = f'prox_{enemy.id}_{ag.id}'
+                if dist < enemy.detection_radius * 2.0:
+                    if self._proximity_cooldowns.get(warn_key, 0) <= 0:
+                        self._proximity_cooldowns[warn_key] = 60
+                    else:
+                        self._proximity_cooldowns[warn_key] -= 1
+                if dist < 5.0:
+                    ag.active = False
+                    ag.score -= 100
+                    print(f"{C.ERR}[A{ag.id}] CONTACT with Enemy-{enemy.id}!{C.END}")
+            if ag.active:
+                all_incapacitated = False
 
-            dist = math.sqrt((enemy.x - robot_x)**2 + (enemy.y - robot_y)**2)
-
-            # Proximity warning
-            warn_key = f"prox_{enemy.id}"
-            if dist < enemy.detection_radius * 2.0:
-                if self._proximity_cooldowns.get(warn_key, 0) <= 0:
-                    print(f"{C.WARN}[THREAT] ⚠ ENEMY-{enemy.id} ({enemy.type}) {dist:.0f}m away{C.END}")
-                    self._proximity_cooldowns[warn_key] = 60
-                else:
-                    self._proximity_cooldowns[warn_key] -= 1
-
-            # Contact check
-            if dist < 5.0:
-                # Per SARGV-FIN-CC: agent is incapacitated (not instant full failure for multi-agent)
-                targets_collected = self.targets_total - len(self.targets)
-                frac = targets_collected / max(self.targets_total, 1)
-                if frac > 0.70:
-                    self.status_message = "MISSION PARTIAL SUCCESS (>70% targets)"
-                else:
-                    self.status_message = "MISSION FAILED: ENEMY CONTACT"
-                self.score    -= 100
-                self.game_over = True
-                print(f"{C.ERR}[GAME] ENEMY CONTACT → {self.status_message} | Score:{self.score}{C.END}")
-                if not self.stats_saved:
-                    save_stats_to_disk(self.stats_history, self.score, self.status_message)
-                    self.stats_saved = True
-                return
-
-        # --- Advance auto_path (pop consumed waypoints) ---
-        while self.robot_auto_path:
-            wp = self.robot_auto_path[0]
-            d  = math.hypot(wp['x'] - robot_x, wp['y'] - robot_y)
-            if d < 5.0:
-                self.robot_auto_path.pop(0)
-            else:
-                break
-
-        # --- Autonomous re-routing ---
-        cx = G.graph.get('center_x_raw', 0)
-        cy = G.graph.get('center_y_raw', 0)
-        self.autonomous_replan(G, robot_node, cx, cy)
+        # Game over when all agents incapacitated
+        if all_incapacitated and self.agents:
+            targets_collected = self.targets_total - len(self.targets)
+            frac = targets_collected / max(self.targets_total, 1)
+            self.status_message = ('MISSION PARTIAL SUCCESS (>70% targets)'
+                                   if frac > 0.70 else 'MISSION FAILED: ENEMY CONTACT')
+            self.game_over = True
+            if not self.stats_saved:
+                save_stats_to_disk(self.stats_history, self.score,
+                                   self.status_message, len(self.agents))
+                self.stats_saved = True
 
 
 # ---------------------------------------------------------------------------
@@ -766,35 +819,43 @@ def _extract_path_coords_centred(G, node_path, cx, cy):
 # BACKGROUND SIMULATION LOOP (self-drives robot when Godot is not connected)
 # ---------------------------------------------------------------------------
 async def simulation_loop():
-    """5 Hz tick: advances robot, runs game update, updates lat/lon."""
+    """5 Hz tick: advances all agents, runs game update, updates lat/lon."""
     while True:
         await asyncio.sleep(TICK_RATE)
         with _sim_lock:
             G = current_map_data.get("G_proj")
             if G is None or game_logic.game_over:
                 continue
-            # Wait for Start button signal
             if not game_logic.sim_running or game_logic.sim_paused:
                 continue
-            # Yield to Godot telemetry if it posted recently (within 2s)
             if time.time() - game_logic.last_telemetry_time < 2.0:
                 continue
             try:
-                cx, cy = current_map_data["center_x"], current_map_data["center_y"]
+                cx = current_map_data["center_x"]
+                cy = current_map_data["center_y"]
                 G.graph['center_x_raw'] = cx
                 G.graph['center_y_raw'] = cy
-
                 effective_dt = TICK_RATE * sim_speed_multiplier
-                game_logic.advance_robot(effective_dt)
-                rx, ry = game_logic.robot_x, game_logic.robot_y
-                robot_node = ox.distance.nearest_nodes(G, rx + cx, ry + cy)
-                game_logic.update(rx, ry, robot_node, G, effective_dt)
+                transformer  = current_map_data.get("transformer")
 
-                transformer = current_map_data.get("transformer")
-                if transformer and 'crs' in G.graph:
-                    lon, lat = transformer.transform(rx + cx, ry + cy)
-                    robot_state["lat"] = lat
-                    robot_state["lon"] = lon
+                for ag in game_logic.agents:
+                    if not ag.active:
+                        continue
+                    game_logic.advance_agent(ag, effective_dt)
+                    ag.robot_node = ox.distance.nearest_nodes(G, ag.robot_x + cx, ag.robot_y + cy)
+                    # Update lat/lon for this agent
+                    if transformer and 'crs' in G.graph:
+                        lon, lat = transformer.transform(ag.robot_x + cx, ag.robot_y + cy)
+                        robot_state["agents"][ag.id] = {"lat": lat, "lon": lon}
+
+                # Primary lat/lon = agent 0
+                if game_logic.agents and transformer and 'crs' in G.graph:
+                    a0 = game_logic.agents[0]
+                    lon0, lat0 = transformer.transform(a0.robot_x + cx, a0.robot_y + cy)
+                    robot_state["lat"] = lat0
+                    robot_state["lon"] = lon0
+
+                game_logic.update(G, effective_dt, cx, cy)
             except Exception as exc:
                 print(f"{C.ERR}[SIM LOOP] {exc}{C.END}")
 
@@ -824,7 +885,11 @@ current_map_data = {
     "transformer":   None,
 }
 game_logic  = SARGameState()
-robot_state = {"lat": None, "lon": None}
+robot_state = {"lat": None, "lon": None, "agents": {}}
+
+# Editor state — temporary placements before deploying
+editor_state: list = []   # list of {type, lat, lon, lon_proj, lat_proj}
+custom_mode: bool = False  # True when /api/map/vector is called with mode=custom
 
 
 # ---------------------------------------------------------------------------
@@ -875,7 +940,8 @@ def get_robot_position():
     transformer = current_map_data.get("transformer")
     if G is None or transformer is None or 'crs' not in G.graph:
         return {**robot_state, "enemies": [], "targets": [], "auto_path": [],
-                "score": 0, "status": "No map", "escape_mode": False, "game_over": False}
+                "agents": [], "score": 0, "status": "No map",
+                "escape_mode": False, "game_over": False}
 
     cx, cy = current_map_data["center_x"], current_map_data["center_y"]
 
@@ -892,23 +958,41 @@ def get_robot_position():
         lon, lat = transformer.transform(t['x'] + cx, t['y'] + cy)
         targets_latlon.append({"id": t['id'], "lat": lat, "lon": lon})
 
-    # Convert auto_path waypoints to lat/lon for browser visualization
-    auto_path_latlon = []
-    for p in game_logic.robot_auto_path[:50]:
-        try:
-            p_lon, p_lat = transformer.transform(p['x'] + cx, p['y'] + cy)
-            auto_path_latlon.append([p_lat, p_lon])
-        except:
-            pass
+    # Per-agent position + path
+    agents_out = []
+    for ag in game_logic.agents:
+        ag_st = robot_state["agents"].get(ag.id, {})
+        path_ll = []
+        for p in ag.robot_auto_path[:50]:
+            try:
+                pl, pa = transformer.transform(p['x'] + cx, p['y'] + cy)
+                path_ll.append([pa, pl])
+            except:
+                pass
+        agents_out.append({
+            "id":         ag.id,
+            "color":      ag.color,
+            "lat":        ag_st.get("lat"),
+            "lon":        ag_st.get("lon"),
+            "auto_path":  path_ll,
+            "score":      ag.score,
+            "escape_mode": ag.escape_mode,
+            "active":     ag.active,
+            "last_decision": ag.last_decision,
+        })
+
+    # Backward compat: primary robot = agent 0
+    primary = agents_out[0] if agents_out else {}
 
     return {
-        "lat":      robot_state["lat"],
-        "lon":      robot_state["lon"],
-        "enemies":  enemies_latlon,
-        "targets":  targets_latlon,
-        "auto_path": auto_path_latlon,
-        "score":    game_logic.score,
-        "status":   game_logic.status_message,
+        "lat":        primary.get("lat") or robot_state["lat"],
+        "lon":        primary.get("lon") or robot_state["lon"],
+        "enemies":    enemies_latlon,
+        "targets":    targets_latlon,
+        "auto_path":  primary.get("auto_path", []),
+        "agents":     agents_out,
+        "score":      game_logic.score,
+        "status":     game_logic.status_message,
         "escape_mode": game_logic.escape_mode,
         "game_over":   game_logic.game_over,
     }
@@ -918,10 +1002,11 @@ def get_robot_position():
 def fetch_vector_map(lat: float = 38.900, lon: float = 22.433, radius: int = 1500,
                      n_patrol: int = 3, n_aggr: int = 2, n_targets: int = 5,
                      patrol_speed: float = 2.5, aggr_speed: float = 4.5,
-                     agent_speed: float = 6.0):
+                     agent_speed: float = 6.0, n_agents: int = 1,
+                     detection_radius: float = 50.0, mode: str = 'random'):
     try:
-        print(f"\n{C.OSM}[OSM] Map Request: lat={lat}, lon={lon}, radius={radius}{C.END}")
-        print(f"{C.OSM}[OSM] Spawn: Patrol={n_patrol}({patrol_speed}m/s) Aggr={n_aggr}({aggr_speed}m/s) Targets={n_targets}{C.END}")
+        print(f"\n{C.OSM}[OSM] Map Request: lat={lat}, lon={lon}, radius={radius}, "
+              f"agents={n_agents}, mode={mode}{C.END}")
 
         G_directed = ox.graph_from_point((lat, lon), dist=radius, network_type='all')
         G          = G_directed.to_undirected()
@@ -929,16 +1014,12 @@ def fetch_vector_map(lat: float = 38.900, lon: float = 22.433, radius: int = 150
         G          = G.subgraph(largest_cc).copy()
         G_proj     = ox.project_graph(G)
 
-        # Apply terrain cost to edge lengths
-        edges_modified = 0
         for u, v, k, data in G_proj.edges(keys=True, data=True):
             hw   = data.get('highway', '')
             if isinstance(hw, list): hw = hw[0]
             mult = HIGHWAY_MULTIPLIER.get(hw, 1.2)
             if mult != 1.0:
                 data['length'] = data.get('length', 1.0) * mult
-                edges_modified += 1
-        print(f"{C.OSM}[TERRAIN] {edges_modified}/{G_proj.number_of_edges()} edges weighted.{C.END}")
 
         nodes_gdf = ox.graph_to_gdfs(G_proj, edges=False)
         min_x, min_y, max_x, max_y = nodes_gdf.total_bounds
@@ -947,9 +1028,7 @@ def fetch_vector_map(lat: float = 38.900, lon: float = 22.433, radius: int = 150
         center_node = ox.distance.nearest_nodes(G_proj, bbox_cx, bbox_cy)
         center_x    = G_proj.nodes[center_node]['x']
         center_y    = G_proj.nodes[center_node]['y']
-        print(f"{C.WARN}[OSM] Center: ({center_x:.2f}, {center_y:.2f}){C.END}")
 
-        # Cache transformer once
         transformer = None
         if 'crs' in G_proj.graph:
             transformer = Transformer.from_crs(G_proj.graph['crs'], "epsg:4326", always_xy=True)
@@ -965,11 +1044,29 @@ def fetch_vector_map(lat: float = 38.900, lon: float = 22.433, radius: int = 150
             "patrol_speed":patrol_speed,
             "aggr_speed":  aggr_speed,
             "agent_speed": agent_speed,
+            "n_agents":    n_agents,
+            "detection_radius": detection_radius,
+            "center_lat":  lat,
+            "center_lon":  lon,
+            "radius":      radius,
         })
+        robot_state["agents"] = {}
 
-        game_logic.robot_speed_ms = agent_speed
-        game_logic.spawn_objects(G_proj, center_x, center_y, n_patrol, n_aggr, n_targets,
-                                  patrol_speed, aggr_speed)
+        # Custom placements need projected coords
+        placements = None
+        if mode == 'custom' and editor_state:
+            placements = []
+            for p in editor_state:
+                # Convert lat/lon → proj using the new transformer (inverse)
+                inv_tf = Transformer.from_crs("epsg:4326", G_proj.graph['crs'], always_xy=True)
+                px, py = inv_tf.transform(p['lon'], p['lat'])
+                placements.append({**p, 'lon_proj': px, 'lat_proj': py})
+
+        game_logic.spawn_objects(
+            G_proj, center_x, center_y,
+            n_patrol, n_aggr, n_targets,
+            patrol_speed, aggr_speed, n_agents, agent_speed,
+            detection_radius, placements)
 
         roads_data = []
         for u, v, data in G_proj.edges(data=True):
@@ -1098,15 +1195,14 @@ def reset_game():
 
 @app.get("/api/sim/clear")
 def clear_game_state():
-    """Instantly wipes enemies and targets (pre-map-load flush)."""
+    """Instantly wipes enemies, targets, and agents (pre-map-load flush)."""
     game_logic.enemies.clear()
     game_logic.targets.clear()
+    game_logic.agents.clear()
     game_logic._proximity_cooldowns.clear()
     game_logic.stats_history.clear()
     game_logic.mission_elapsed  = 0.0
-    game_logic.score            = 0
     game_logic.game_over        = False
-    game_logic.robot_auto_path  = []
     game_logic.status_message   = "Clearing..."
     game_logic.sim_running      = False
     game_logic.sim_paused       = False
@@ -1162,52 +1258,49 @@ def sim_restart():
         return {"status": "failed", "message": "No map loaded"}
     snap = game_logic._spawn_snapshot
     if snap is None:
-        # Fall back to full re-spawn
-        cx = current_map_data["center_x"]
-        cy = current_map_data["center_y"]
-        n_patrol     = current_map_data.get("n_patrol",     3)
-        n_aggr       = current_map_data.get("n_aggr",       2)
-        n_targets    = current_map_data.get("n_targets",    5)
-        patrol_speed = current_map_data.get("patrol_speed", 2.5)
-        aggr_speed   = current_map_data.get("aggr_speed",   4.5)
-        game_logic.spawn_objects(G, cx, cy, n_patrol, n_aggr, n_targets, patrol_speed, aggr_speed)
+        cx = current_map_data["center_x"]; cy = current_map_data["center_y"]
+        game_logic.spawn_objects(
+            G, cx, cy,
+            current_map_data.get("n_patrol", 3),
+            current_map_data.get("n_aggr", 2),
+            current_map_data.get("n_targets", 5),
+            current_map_data.get("patrol_speed", 2.5),
+            current_map_data.get("aggr_speed", 4.5),
+            current_map_data.get("n_agents", 1),
+            current_map_data.get("agent_speed", 6.0),
+            current_map_data.get("detection_radius", 50.0))
         return {"status": "reset", "note": "No snapshot; used random re-spawn"}
 
     with _sim_lock:
         cx, cy = current_map_data["center_x"], current_map_data["center_y"]
-
         # Restore enemies
         game_logic.enemies.clear()
-        for i, es in enumerate(snap["enemies"]):
+        for es in snap["enemies"]:
             e = Enemy(es["id"], es["base_type"], es["node"], G, cx, cy,
-                      es["patrol_speed"], es["aggr_speed"])
+                      es["patrol_speed"], es["aggr_speed"], es.get("detection_radius", 50.0))
             game_logic.enemies.append(e)
-
         # Restore targets
-        game_logic.targets = [dict(t) for t in snap["targets"]]
+        game_logic.targets       = [dict(t) for t in snap["targets"]]
         game_logic.targets_total = len(game_logic.targets)
-
-        # Reset robot
-        game_logic.robot_x          = snap["robot"]["x"]
-        game_logic.robot_y          = snap["robot"]["y"]
-        game_logic.robot_auto_path  = []
-        game_logic.current_target_id = None
-        game_logic.replan_timer     = 0.0
-        game_logic.escape_mode      = False
-
+        game_logic.dead_ends     = compute_dead_ends(G)
+        # Restore agents
+        game_logic.agents.clear()
+        robot_state["agents"] = {}
+        for ags in snap["agents"]:
+            ag = AgentState(ags["id"], ags["node"], G, cx, cy, ags["speed"])
+            ag.dead_ends = game_logic.dead_ends
+            game_logic.agents.append(ag)
+        game_logic._assign_targets_to_agents(G)
         # Reset mission state
-        game_logic.score              = 0
-        game_logic.game_over          = False
-        game_logic.status_message     = "Mission Restart"
-        game_logic.mission_elapsed    = 0.0
+        game_logic.game_over              = False
+        game_logic.status_message         = "Mission Restart"
+        game_logic.mission_elapsed        = 0.0
         game_logic.stats_history.clear()
-        game_logic.stats_saved        = False
+        game_logic.stats_saved            = False
         game_logic._proximity_cooldowns.clear()
-        game_logic._last_robot_node   = None
-        game_logic.last_decision      = "Mission restarted — press Start"
-        game_logic.sim_running        = False
-        game_logic.sim_paused         = False
-        game_logic.last_telemetry_time = 0.0
+        game_logic.last_telemetry_time    = 0.0
+        game_logic.sim_running            = False
+        game_logic.sim_paused             = False
 
     robot_state["lat"] = None
     robot_state["lon"] = None
@@ -1251,17 +1344,145 @@ def get_sim_speed():
 def get_stats():
     """Returns mission time-series + decision log for charts and stats.html."""
     return {
-        "elapsed":       round(game_logic.mission_elapsed, 1),
-        "score":         game_logic.score,
+        "elapsed":           round(game_logic.mission_elapsed, 1),
+        "score":             game_logic.score,
         "targets_remaining": len(game_logic.targets),
-        "targets_total": game_logic.targets_total,
-        "enemies_count": len(game_logic.enemies),
-        "status":        game_logic.status_message,
-        "game_over":     game_logic.game_over,
-        "escape_mode":   game_logic.escape_mode,
-        "last_decision": game_logic.last_decision,
-        "history":       game_logic.stats_history,
+        "targets_total":     game_logic.targets_total,
+        "enemies_count":     len(game_logic.enemies),
+        "status":            game_logic.status_message,
+        "game_over":         game_logic.game_over,
+        "escape_mode":       game_logic.escape_mode,
+        "last_decision":     game_logic.last_decision,
+        "history":           game_logic.stats_history,
+        "agents_stats":      [
+            {
+                "id":               a.id,
+                "color":            a.color,
+                "score":            a.score,
+                "targets_collected": a.targets_collected,
+                "escape_events":    a.escape_events,
+                "terrain_penalty":  a.terrain_penalty,
+                "active":           a.active,
+                "last_decision":    a.last_decision,
+                "escape_mode":      a.escape_mode,
+            } for a in game_logic.agents
+        ],
     }
+
+
+# ---------------------------------------------------------------------------
+# EDITOR ENDPOINTS
+# ---------------------------------------------------------------------------
+
+class PlacementRequest(BaseModel):
+    type: str   # 'agent' | 'target' | 'patrol' | 'aggressive'
+    lat: float
+    lon: float
+
+
+@app.post("/api/editor/place")
+def editor_place(req: PlacementRequest):
+    editor_state.append({"type": req.type, "lat": req.lat, "lon": req.lon})
+    return {"status": "ok", "count": len(editor_state)}
+
+
+@app.post("/api/editor/clear")
+def editor_clear():
+    editor_state.clear()
+    return {"status": "cleared"}
+
+
+@app.delete("/api/editor/remove")
+def editor_remove(idx: int):
+    if 0 <= idx < len(editor_state):
+        editor_state.pop(idx)
+        return {"status": "removed", "count": len(editor_state)}
+    return {"status": "invalid index"}
+
+
+@app.get("/api/editor/state")
+def get_editor_state():
+    return {"placements": editor_state}
+
+
+# ---------------------------------------------------------------------------
+# SCENARIO SAVE / LOAD
+# ---------------------------------------------------------------------------
+
+class ScenarioSaveRequest(BaseModel):
+    name: str
+    params: dict = {}
+
+
+@app.post("/api/scenario/save")
+def scenario_save(req: ScenarioSaveRequest):
+    try:
+        os.makedirs(SCENARIOS_DIR, exist_ok=True)
+        safe_name = "".join(c for c in req.name if c.isalnum() or c in (' ', '_', '-')).strip()
+        if not safe_name:
+            raise HTTPException(400, "Invalid scenario name")
+        data = {
+            "name":       safe_name,
+            "placements": list(editor_state),
+            "params":     req.params,
+            "saved_at":   time.time(),
+        }
+        path = os.path.join(SCENARIOS_DIR, f"{safe_name}.json")
+        with open(path, 'w') as f:
+            json.dump(data, f, indent=2)
+        return {"status": "saved", "name": safe_name}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/scenario/list")
+def scenario_list():
+    try:
+        os.makedirs(SCENARIOS_DIR, exist_ok=True)
+        files = sorted(os.listdir(SCENARIOS_DIR))
+        scenarios = []
+        for f in files:
+            if not f.endswith('.json'):
+                continue
+            try:
+                with open(os.path.join(SCENARIOS_DIR, f)) as fh:
+                    d = json.load(fh)
+                scenarios.append({"name": d.get("name", f), "file": f,
+                                   "saved_at": d.get("saved_at", 0),
+                                   "params": d.get("params", {})})
+            except:
+                continue
+        return {"scenarios": scenarios}
+    except Exception as e:
+        return {"scenarios": [], "error": str(e)}
+
+
+@app.post("/api/scenario/load")
+def scenario_load(body: dict):
+    name = body.get("name", "")
+    path = os.path.join(SCENARIOS_DIR, f"{name}.json")
+    if not os.path.exists(path):
+        raise HTTPException(404, "Scenario not found")
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        editor_state.clear()
+        editor_state.extend(data.get("placements", []))
+        return {"status": "loaded", "name": name, "params": data.get("params", {}),
+                "placements": editor_state}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.delete("/api/scenario/delete")
+def scenario_delete(name: str):
+    path = os.path.join(SCENARIOS_DIR, f"{name}.json")
+    if os.path.exists(path):
+        os.remove(path)
+        return {"status": "deleted"}
+    raise HTTPException(404, "Not found")
 
 
 @app.get("/api/stats/history")
@@ -1277,43 +1498,88 @@ def list_stats_history():
 
 @app.get("/api/stats/summary")
 def get_stats_summary():
-    """Aggregate all saved mission files into success/partial/failed counts + score stats."""
+    """Aggregate all saved mission files; group by n_agents (1-4)."""
     try:
         os.makedirs(STATS_DIR, exist_ok=True)
         files = sorted(os.listdir(STATS_DIR))
-        success = partial = failed = 0
-        scores = []
-        recent = []  # last 10 missions for timeline
+        # per-agent-count buckets
+        buckets: dict = {}   # n_agents -> {success,partial,failed,scores,recent}
+        all_scores = []
+        all_recent = []
         for fname in files:
             if not fname.endswith(".json"):
                 continue
             try:
                 with open(os.path.join(STATS_DIR, fname)) as f:
                     m = json.load(f)
-                status = m.get("final_status", "").upper()
-                score  = m.get("final_score", 0)
-                ts     = m.get("timestamp", 0)
+                status  = m.get("final_status", "").upper()
+                score   = m.get("final_score", 0)
+                ts      = m.get("timestamp", 0)
+                n_ag    = m.get("n_agents", 1)
                 if "SUCCESS" in status and "PARTIAL" not in status:
-                    result = "success"; success += 1
+                    result = "success"
                 elif "PARTIAL" in status:
-                    result = "partial"; partial += 1
+                    result = "partial"
                 else:
-                    result = "failed";  failed += 1
-                scores.append(score)
-                recent.append({"ts": ts, "result": result, "score": score})
+                    result = "failed"
+                b = buckets.setdefault(n_ag, {"success": 0, "partial": 0,
+                                               "failed": 0, "scores": [], "recent": []})
+                b[result] += 1
+                b["scores"].append(score)
+                b["recent"].append({"ts": ts, "result": result, "score": score})
+                all_scores.append(score)
+                all_recent.append({"ts": ts, "result": result, "score": score, "n_agents": n_ag})
             except Exception:
                 continue
-        total = success + partial + failed
+
+        def bucket_summary(b):
+            total = b["success"] + b["partial"] + b["failed"]
+            return {
+                "total":      total,
+                "success":    b["success"],
+                "partial":    b["partial"],
+                "failed":     b["failed"],
+                "best_score": max(b["scores"]) if b["scores"] else 0,
+                "avg_score":  round(sum(b["scores"]) / len(b["scores"]), 1) if b["scores"] else 0,
+                "recent":     sorted(b["recent"], key=lambda x: x["ts"])[-20:],
+            }
+
+        by_agents = {str(k): bucket_summary(v) for k, v in buckets.items()}
+        overall_total = sum(v["success"] + v["partial"] + v["failed"] for v in buckets.values())
         return {
-            "total":   total,
-            "success": success,
-            "partial": partial,
-            "failed":  failed,
-            "best_score":  max(scores) if scores else 0,
-            "avg_score":   round(sum(scores) / len(scores), 1) if scores else 0,
-            "recent":  sorted(recent, key=lambda x: x["ts"])[-20:],
+            "total":      overall_total,
+            "success":    sum(v["success"] for v in buckets.values()),
+            "partial":    sum(v["partial"] for v in buckets.values()),
+            "failed":     sum(v["failed"]  for v in buckets.values()),
+            "best_score": max(all_scores) if all_scores else 0,
+            "avg_score":  round(sum(all_scores) / len(all_scores), 1) if all_scores else 0,
+            "recent":     sorted(all_recent, key=lambda x: x["ts"])[-20:],
+            "by_agents":  by_agents,   # keyed by str(n_agents)
         }
     except Exception as e:
         return {"total": 0, "success": 0, "partial": 0, "failed": 0,
-                "best_score": 0, "avg_score": 0, "recent": [], "error": str(e)}
+                "best_score": 0, "avg_score": 0, "recent": [], "by_agents": {},
+                "error": str(e)}
+
+
+@app.get("/api/map/info")
+def get_map_info():
+    """Return current map params so mission.html can self-deploy."""
+    return {
+        "has_map":         current_map_data.get("G_proj") is not None,
+        "lat":             current_map_data.get("center_lat"),
+        "lon":             current_map_data.get("center_lon"),
+        "radius":          current_map_data.get("radius", 1500),
+        "n_patrol":        current_map_data.get("n_patrol", 3),
+        "n_aggr":          current_map_data.get("n_aggr", 2),
+        "n_targets":       current_map_data.get("n_targets", 5),
+        "patrol_speed":    current_map_data.get("patrol_speed", 2.5),
+        "aggr_speed":      current_map_data.get("aggr_speed", 4.5),
+        "agent_speed":     current_map_data.get("agent_speed", 6.0),
+        "n_agents":        current_map_data.get("n_agents", 1),
+        "detection_radius":current_map_data.get("detection_radius", 50.0),
+        "sim_running":     game_logic.sim_running,
+        "sim_paused":      game_logic.sim_paused,
+        "game_over":       game_logic.game_over,
+    }
 

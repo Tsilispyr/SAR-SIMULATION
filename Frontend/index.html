@@ -339,6 +339,33 @@
             <label>Robot Speed (m/s): <span id="val-agent-speed" class="val-display">6.0</span></label>
             <input type="range" id="agent_speed" min="1" max="30" step="0.5" value="6"
                 oninput="updateVal('agent-speed', this.value)">
+            <label>Number of Agents: <span id="val-n-agents" class="val-display">1</span></label>
+            <input type="range" id="n_agents" min="1" max="4" step="1" value="1"
+                oninput="updateVal('n-agents', this.value)">
+        </div>
+
+        <div class="control-group">
+            <h3>Enemies</h3>
+            <label>Detection Radius (m): <span id="val-detect-r" class="val-display">50</span></label>
+            <input type="range" id="detect_r" min="20" max="150" step="5" value="50"
+                oninput="updateVal('detect-r', this.value)">
+        </div>
+
+        <div class="control-group">
+            <h3>Scenario</h3>
+            <select id="scenario-select"
+                style="width:100%;margin-bottom:6px;padding:5px;border-radius:5px;border:1px solid #555;background:#1a2030;color:#ccc;">
+                <option value="">-- Load saved scenario --</option>
+            </select>
+            <div style="display:flex;gap:6px;">
+                <button onclick="loadScenario()" style="flex:1">Load</button>
+                <button onclick="openEditor()" style="flex:1">Open Editor</button>
+            </div>
+            <div style="display:flex;gap:6px;margin-top:6px;">
+                <input id="scenario-name" type="text" placeholder="Scenario name…"
+                    style="flex:1;padding:5px;border-radius:5px;border:1px solid #555;background:#1a2030;color:#ccc;">
+                <button onclick="saveScenario()" style="flex:1">Save</button>
+            </div>
         </div>
 
         <button onclick="sendMapCoordinates()">Deploy Mission</button>
@@ -491,6 +518,8 @@
 
         // --- Deploy ---
         window.sendMapCoordinates = async function () {
+            const mode = window._customDeploy ? 'custom' : 'random';
+            window._customDeploy = false;  // consume flag
             var radius = document.getElementById('radius').value;
             var n_patrol = document.getElementById('n_patrol').value;
             var n_aggr = document.getElementById('n_aggr').value;
@@ -498,6 +527,8 @@
             var patrol_speed = document.getElementById('patrol_speed').value;
             var aggr_speed = document.getElementById('aggr_speed').value;
             var agent_speed = document.getElementById('agent_speed').value;
+            var n_agents = document.getElementById('n_agents').value;
+            var detect_r = document.getElementById('detect_r').value;
 
             var btn = document.querySelector('button');
             btn.innerText = 'Loading...'; btn.disabled = true;
@@ -505,15 +536,19 @@
 
             try { await fetch('http://localhost:8000/api/sim/clear'); } catch (e) { }
 
-            var url = `http://localhost:8000/api/map/vector?lat=${selectedLat}&lon=${selectedLon}&radius=${radius}&n_patrol=${n_patrol}&n_aggr=${n_aggr}&n_targets=${n_targets}&patrol_speed=${patrol_speed}&aggr_speed=${aggr_speed}&agent_speed=${agent_speed}`;
+            var url = `http://localhost:8000/api/map/vector?lat=${selectedLat}&lon=${selectedLon}&radius=${radius}` +
+                `&n_patrol=${n_patrol}&n_aggr=${n_aggr}&n_targets=${n_targets}` +
+                `&patrol_speed=${patrol_speed}&aggr_speed=${aggr_speed}` +
+                `&agent_speed=${agent_speed}&n_agents=${n_agents}` +
+                `&detection_radius=${detect_r}&mode=${mode}`;
             try {
                 let res = await fetch(url);
                 if (res.ok) {
-                    document.getElementById('status').innerText = 'Map loaded! Simulation ready.';
+                    document.getElementById('status').innerText = `Map loaded (${mode} mode)! Simulation ready.`;
                     document.getElementById('hud').style.display = 'flex';
                     document.getElementById('btn-stats').disabled = false;
                     document.getElementById('btn-mission').disabled = false;
-                    alert('Map & entities loaded!\nClick "Live Mission View" and press Start to begin.');
+                    alert(`Map & entities loaded (${mode} mode)!\nClick "Live Mission View" and press Start to begin.`);
                 } else {
                     document.getElementById('status').innerText = 'Server error.';
                 }
@@ -525,6 +560,100 @@
 
         window.openStats = function () { window.open('stats.html', '_blank'); };
         window.openMission = function () { window.open('mission.html', '_blank'); };
+        window.openEditor = function () { window.open('editor.html', '_blank'); };
+
+        // Scenario save / load
+        window.saveScenario = async function () {
+            const name = document.getElementById('scenario-name').value.trim();
+            if (!name) { alert('Enter a scenario name first'); return; }
+            const params = {
+                n_patrol: parseInt(document.getElementById('n_patrol').value),
+                n_aggr: parseInt(document.getElementById('n_aggr').value),
+                n_targets: parseInt(document.getElementById('n_targets').value),
+                patrol_speed: parseFloat(document.getElementById('patrol_speed').value),
+                aggr_speed: parseFloat(document.getElementById('aggr_speed').value),
+                agent_speed: parseFloat(document.getElementById('agent_speed').value),
+                n_agents: parseInt(document.getElementById('n_agents').value),
+                detect_r: parseInt(document.getElementById('detect_r').value),
+                lat: selectedLat, lon: selectedLon,
+                radius: parseInt(document.getElementById('radius').value)
+            };
+            try {
+                const r = await fetch('http://localhost:8000/api/scenario/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, params })
+                });
+                const d = await r.json();
+                alert(`Saved: "${d.name}"`);
+                loadScenarioList();
+            } catch (e) { alert('Save failed: ' + e); }
+        };
+
+        window.loadScenario = async function () {
+            const sel = document.getElementById('scenario-select').value;
+            if (!sel) { alert('Select a scenario first'); return; }
+            try {
+                const r = await fetch('http://localhost:8000/api/scenario/load', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: sel })
+                });
+                const d = await r.json();
+                const p = d.params || {};
+                // Teleport to scenario region
+                const destLat = p.lat || (d.placements && d.placements.length ? d.placements[0].lat : null);
+                const destLon = p.lon || (d.placements && d.placements.length ? d.placements[0].lon : null);
+                const destRad = parseInt(p.radius) || parseInt(document.getElementById('radius').value);
+                if (destLat && destLon) {
+                    selectedLat = destLat; selectedLon = destLon;
+                    syncPin(destLat, destLon); syncInputs(destLat, destLon);
+                    const zl = destRad < 400 ? 17 : destRad < 1000 ? 16 : destRad < 2000 ? 15 : 14;
+                    map.setView([destLat, destLon], zl);
+                    if (drawCircle) { drawCircle.setLatLng([destLat, destLon]); drawCircle.setRadius(destRad); }
+                    else { drawCircle = L.circle([destLat, destLon], { radius: destRad, color: '#b3ca30', weight: 1, fillOpacity: 0.04 }).addTo(map); }
+                }
+                // Fill parameters
+                if (p.n_patrol) document.getElementById('n_patrol').value = p.n_patrol;
+                if (p.n_aggr) document.getElementById('n_aggr').value = p.n_aggr;
+                if (p.n_targets) document.getElementById('n_targets').value = p.n_targets;
+                if (p.patrol_speed) { document.getElementById('patrol_speed').value = p.patrol_speed; updateVal('patrol-speed', p.patrol_speed); }
+                if (p.aggr_speed) { document.getElementById('aggr_speed').value = p.aggr_speed; updateVal('aggr-speed', p.aggr_speed); }
+                if (p.agent_speed) { document.getElementById('agent_speed').value = p.agent_speed; updateVal('agent-speed', p.agent_speed); }
+                if (p.n_agents) { document.getElementById('n_agents').value = p.n_agents; updateVal('n-agents', p.n_agents); }
+                if (p.detect_r) { document.getElementById('detect_r').value = p.detect_r; updateVal('detect-r', p.detect_r); }
+                if (p.radius) { document.getElementById('radius').value = p.radius; updateVal('radius', p.radius); }
+                // Show placement previews on map
+                const PCOLORS = { agent: '#3d78ff', target: 'gold', patrol: '#a855f7', aggressive: '#ef4444' };
+                if (!window._scnPrev) window._scnPrev = [];
+                window._scnPrev.forEach(m => map.removeLayer(m)); window._scnPrev = [];
+                (d.placements || []).forEach(pl => {
+                    if (!pl.lat || !pl.lon) return;
+                    const col = PCOLORS[pl.type] || '#aaa';
+                    const m = L.circleMarker([pl.lat, pl.lon], { color: col, fillColor: col, fillOpacity: 0.85, radius: 8, weight: 1.5 }).addTo(map).bindTooltip(pl.type);
+                    window._scnPrev.push(m);
+                });
+                const np = (d.placements || []).length;
+                // Flag custom deploy mode if placements exist
+                window._customDeploy = np > 0;
+                document.getElementById('status').innerText = `Loaded: "${sel}" — ${np ? np + ' placements · custom mode active · ' : ''}click Deploy Mission`;
+            } catch (e) { alert('Load failed: ' + e); }
+        };
+
+        async function loadScenarioList() {
+            try {
+                const d = await (await fetch('http://localhost:8000/api/scenario/list')).json();
+                const sel = document.getElementById('scenario-select');
+                sel.innerHTML = '<option value="">-- Load saved scenario --</option>';
+                (d.scenarios || []).forEach(s => {
+                    const opt = document.createElement('option');
+                    opt.value = s.name; opt.textContent = s.name;
+                    sel.appendChild(opt);
+                });
+            } catch (e) { }
+        }
+        loadScenarioList();
+        setInterval(loadScenarioList, 30000);
 
         // --- Tracking state ---
         var robotMarker = null, enemyMarkers = {}, targetMarkers = {}, riskMarkers = {};

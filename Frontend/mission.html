@@ -338,6 +338,86 @@
             vertical-align: middle;
         }
 
+        /* --- DEPLOY PANEL --- */
+        #deploy-panel {
+            position: fixed;
+            top: 56px;
+            left: 14px;
+            width: 230px;
+            background: rgba(15, 17, 23, .97);
+            border: 1px solid rgba(109, 133, 153, .7);
+            border-radius: 10px;
+            padding: 12px 14px;
+            z-index: 1001;
+            display: none;
+            backdrop-filter: blur(10px);
+            font-family: 'Share Tech Mono', monospace;
+        }
+
+        #deploy-panel h3 {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 9px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: rgba(179, 202, 48, .9);
+            margin-bottom: 10px;
+        }
+
+        .dp-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 6px;
+            font-size: 10px;
+            color: #aab4c4;
+        }
+
+        .dp-row input[type=range] {
+            width: 90px;
+        }
+
+        .dp-val {
+            min-width: 28px;
+            text-align: right;
+            color: #b3ca30;
+            font-weight: 700;
+        }
+
+        .dp-sep {
+            height: 1px;
+            background: rgba(109, 133, 153, .35);
+            margin: 8px 0;
+        }
+
+        .dp-btn {
+            width: 100%;
+            padding: 7px;
+            border-radius: 6px;
+            border: 1px solid rgba(109, 133, 153, .6);
+            background: rgba(255, 255, 255, .06);
+            color: #cdd6f4;
+            cursor: pointer;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 9px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            margin-top: 4px;
+            transition: .2s;
+        }
+
+        .dp-btn:hover {
+            background: rgba(255, 255, 255, .13);
+        }
+
+        .dp-btn.green {
+            border-color: #19a725;
+            color: #19a725;
+        }
+
+        .dp-btn.green:hover {
+            background: rgba(25, 167, 37, .15);
+        }
+
         /* --- PATH LINE --- */
         @keyframes dash {
             to {
@@ -436,8 +516,33 @@
         <button class="speed-btn" data-mult="32" onclick="setSpeed(32)">32×</button>
         <button class="speed-btn" data-mult="100" onclick="setSpeed(100)">100×</button>
         <div class="top-sep"></div>
+        <button class="top-btn" onclick="toggleDeployPanel()" id="btn-new-mission">⊕ New Mission</button>
         <a class="top-btn" href="index.html">← Control</a>
         <a class="top-btn" href="stats.html" target="_blank">Analytics</a>
+    </div>
+
+    <!-- Embedded deploy panel -->
+    <div id="deploy-panel">
+        <h3>New Mission Setup</h3>
+        <div class="dp-row"><span>Agents</span><input id="dp-agents" type="range" min="1" max="4" value="1"
+                oninput="dpV('dp-agents','dp-v-agents')"><span class="dp-val" id="dp-v-agents">1</span></div>
+        <div class="dp-row"><span>Targets</span><input id="dp-targets" type="range" min="2" max="15" value="5"
+                oninput="dpV('dp-targets','dp-v-targets')"><span class="dp-val" id="dp-v-targets">5</span></div>
+        <div class="dp-row"><span>Patrol</span><input id="dp-patrol" type="range" min="0" max="8" value="3"
+                oninput="dpV('dp-patrol','dp-v-patrol')"><span class="dp-val" id="dp-v-patrol">3</span></div>
+        <div class="dp-row"><span>Aggressive</span><input id="dp-aggr" type="range" min="0" max="8" value="2"
+                oninput="dpV('dp-aggr','dp-v-aggr')"><span class="dp-val" id="dp-v-aggr">2</span></div>
+        <div class="dp-row"><span>Patrol spd</span><input id="dp-pspd" type="range" min="1" max="8" value="2.5"
+                step="0.5" oninput="dpV('dp-pspd','dp-v-pspd')"><span class="dp-val" id="dp-v-pspd">2.5</span></div>
+        <div class="dp-row"><span>Aggr spd</span><input id="dp-aspd" type="range" min="1" max="10" value="4.5"
+                step="0.5" oninput="dpV('dp-aspd','dp-v-aspd')"><span class="dp-val" id="dp-v-aspd">4.5</span></div>
+        <div class="dp-row"><span>Agent spd</span><input id="dp-rspd" type="range" min="2" max="14" value="6" step="0.5"
+                oninput="dpV('dp-rspd','dp-v-rspd')"><span class="dp-val" id="dp-v-rspd">6</span></div>
+        <div class="dp-row"><span>Detect R</span><input id="dp-drad" type="range" min="20" max="150" value="50"
+                oninput="dpV('dp-drad','dp-v-drad')"><span class="dp-val" id="dp-v-drad">50</span></div>
+        <div class="dp-sep"></div>
+        <button class="dp-btn green" onclick="deployNewMission()">▶ Deploy New Mission</button>
+        <button class="dp-btn" onclick="document.getElementById('deploy-panel').style.display='none'">✕ Close</button>
     </div>
 
     <!-- Mission control panel -->
@@ -458,10 +563,6 @@
 
     <div id="hud">
         <div class="hud-card">
-            <div class="hud-label">Score</div>
-            <div class="hud-value c-accent" id="hud-score">0</div>
-        </div>
-        <div class="hud-card">
             <div class="hud-label">Targets</div>
             <div class="hud-value c-warn" id="hud-targets">-</div>
         </div>
@@ -469,15 +570,13 @@
             <div class="hud-label">Enemies</div>
             <div class="hud-value c-danger" id="hud-enemies">-</div>
         </div>
-        <div class="hud-card">
-            <div class="hud-label">AI Mode</div>
-            <div class="hud-value c-good" id="hud-mode">—</div>
-        </div>
     </div>
 
     <div id="legend">
-        <div><span class="leg-dot" style="background:#3d78ff"></span>SAR Robot</div>
-        <div><span class="leg-dot" style="background:#22c55e"></span>Auto-Path</div>
+        <div><span class="leg-dot" style="background:#3d78ff"></span>Agent 1</div>
+        <div><span class="leg-dot" style="background:#22c55e"></span>Agent 2</div>
+        <div><span class="leg-dot" style="background:#f97316"></span>Agent 3</div>
+        <div><span class="leg-dot" style="background:#e879f9"></span>Agent 4</div>
         <div><span class="leg-dot" style="background:gold"></span>Target</div>
         <div><span class="leg-dot" style="background:#ef4444"></span>Aggressive</div>
         <div><span class="leg-dot" style="background:#a855f7"></span>Patrol</div>
@@ -498,11 +597,12 @@
         // --- State ---
         let followRobot = true;
         let missionDone = false;
-        let robotMarker = null;
-        let autoPathLine = null;
+        let agentMarkers = {};
+        let agentPaths = {};
         let enemyMarkers = {};
         let enemyRings = {};
         let targetMarkers = {};
+        let lastAgentCount = 0;
 
         // Mission control state
         let mcState = 'idle'; // idle | running | paused | stopped | game_over
@@ -519,62 +619,132 @@
             return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
         }
 
-        // Robot icon
-        const robotIcon = L.divIcon({
-            className: '',
-            html: `<div style="width:14px;height:14px;background:#3d78ff;border-radius:50%;border:2px solid #fff;box-shadow:0 0 8px #3d78ff,0 0 16px rgba(61,120,255,.5);"></div>`,
-            iconSize: [14, 14], iconAnchor: [7, 7]
-        });
+        // Agent icons (per agent colour)
+        const AGENT_COLORS = ['#3d78ff', '#22c55e', '#f97316', '#e879f9'];
+        function agentIcon(color) {
+            return L.divIcon({
+                className: '',
+                html: `<div style="width:14px;height:14px;background:${color};border-radius:50%;border:2px solid #fff;box-shadow:0 0 8px ${color},0 0 16px ${color}66;"></div>`,
+                iconSize: [14, 14], iconAnchor: [7, 7]
+            });
+        }
 
         // ── Mission Control Buttons ──
         function setMCButtons(state) {
             mcState = state;
-            let s = document.getElementById('mc-start');
-            let p = document.getElementById('mc-pause');
-            let st = document.getElementById('mc-stop');
-            let r = document.getElementById('mc-restart');
-
+            const s  = document.getElementById('mc-start');
+            const p  = document.getElementById('mc-pause');
+            const st = document.getElementById('mc-stop');
+            const r  = document.getElementById('mc-restart');
+            if (!s) return; // guard if panel not yet in DOM
             s.disabled = true; p.disabled = true; st.disabled = true; r.disabled = true;
             s.textContent = 'Start';
-
-            if (state === 'idle') {
-                s.disabled = false;
-            } else if (state === 'running') {
-                p.disabled = false; st.disabled = false;
-            } else if (state === 'paused') {
-                s.disabled = false; s.textContent = '▶ Resume';
-                st.disabled = false;
-            } else if (state === 'stopped' || state === 'game_over') {
-                r.disabled = false;
-            }
+            if (state === 'idle')       { s.disabled = false; }
+            else if (state === 'running')   { p.disabled = false; st.disabled = false; }
+            else if (state === 'paused')    { s.disabled = false; s.textContent = '▶ Resume'; st.disabled = false; }
+            else if (state === 'stopped' || state === 'game_over') { r.disabled = false; }
         }
 
         async function mcStart() {
             try {
-                let res = await fetch('http://127.0.0.1:8000/api/sim/start', { method: 'POST' });
-                let d = await res.json();
-                if (d.status === 'running') {
-                    setMCButtons('running');
-                    missionDone = false;
-                    document.getElementById('end-banner').style.display = 'none';
-                } else if (d.status === 'game_over') {
-                    setMCButtons('game_over');
-                }
+                const res = await fetch('http://127.0.0.1:8000/api/sim/start', { method: 'POST' });
+                const d   = await res.json();
+                if (d.status === 'running')   { setMCButtons('running'); missionDone = false; document.getElementById('end-banner').style.display = 'none'; }
+                else if (d.status === 'game_over') setMCButtons('game_over');
             } catch (e) { }
         }
 
         async function mcPause() {
             try {
-                let d = await (await fetch('http://127.0.0.1:8000/api/sim/pause', { method: 'POST' })).json();
+                const d = await (await fetch('http://127.0.0.1:8000/api/sim/pause', { method: 'POST' })).json();
                 setMCButtons(d.status === 'paused' ? 'paused' : 'running');
             } catch (e) { }
         }
 
         async function mcStop() {
+            try { await fetch('http://127.0.0.1:8000/api/sim/stop', { method: 'POST' }); setMCButtons('stopped'); }
+            catch (e) { }
+        }
+
+        // ── Deploy utils ──
+        function dpV(sliderId, valId) {
+            document.getElementById(valId).textContent = document.getElementById(sliderId).value;
+        }
+
+        function toggleDeployPanel() {
+            const p = document.getElementById('deploy-panel');
+            p.style.display = p.style.display === 'block' ? 'none' : 'block';
+        }
+
+        // Populate deploy panel defaults from /api/map/info
+        async function loadMapInfo() {
             try {
-                await fetch('http://127.0.0.1:8000/api/sim/stop', { method: 'POST' });
-                setMCButtons('stopped');
+                const d = await (await fetch('http://127.0.0.1:8000/api/map/info')).json();
+                if (d.has_map) {
+                    currentMapLat = d.lat; currentMapLon = d.lon;
+                    currentMapRadius = d.radius;
+                    const set = (id, vid, v) => { if (v != null) { document.getElementById(id).value = v; document.getElementById(vid).textContent = v; } };
+                    set('dp-agents', 'dp-v-agents', d.n_agents);
+                    set('dp-targets', 'dp-v-targets', d.n_targets);
+                    set('dp-patrol', 'dp-v-patrol', d.n_patrol);
+                    set('dp-aggr', 'dp-v-aggr', d.n_aggr);
+                    set('dp-pspd', 'dp-v-pspd', d.patrol_speed);
+                    set('dp-aspd', 'dp-v-aspd', d.aggr_speed);
+                    set('dp-rspd', 'dp-v-rspd', d.agent_speed);
+                    set('dp-drad', 'dp-v-drad', d.detection_radius);
+                    // Sync Mission Control button state
+                    if (d.sim_running && !d.sim_paused) setMCButtons('running');
+                    else if (d.sim_paused) setMCButtons('paused');
+                    else if (d.game_over) setMCButtons('game_over');
+                    else setMCButtons('idle');
+                }
             } catch (e) { }
+        }
+
+        let currentMapLat = 38.900;
+        let currentMapLon = 22.433;
+        let currentMapRadius = 1500;
+
+        async function deployNewMission() {
+            if (!confirm('Deploy a new mission? The current mission will be cleared.')) return;
+            document.getElementById('deploy-panel').style.display = 'none';
+            const params = {
+                lat: currentMapLat, lon: currentMapLon,
+                radius: currentMapRadius,
+                n_agents: parseInt(document.getElementById('dp-agents').value),
+                n_targets: parseInt(document.getElementById('dp-targets').value),
+                n_patrol: parseInt(document.getElementById('dp-patrol').value),
+                n_aggr: parseInt(document.getElementById('dp-aggr').value),
+                patrol_speed: parseFloat(document.getElementById('dp-pspd').value),
+                aggr_speed: parseFloat(document.getElementById('dp-aspd').value),
+                agent_speed: parseFloat(document.getElementById('dp-rspd').value),
+                detection_radius: parseFloat(document.getElementById('dp-drad').value),
+            };
+            // Clear markers
+            for (const id in agentMarkers) map.removeLayer(agentMarkers[id]);
+            for (const id in agentPaths) map.removeLayer(agentPaths[id]);
+            for (const id in enemyMarkers) map.removeLayer(enemyMarkers[id]);
+            for (const id in enemyRings) map.removeLayer(enemyRings[id]);
+            for (const id in targetMarkers) map.removeLayer(targetMarkers[id]);
+            agentMarkers = {}; agentPaths = {}; enemyMarkers = {}; enemyRings = {}; targetMarkers = {};
+            lastAgentCount = 0;
+            missionDone = false;
+            document.getElementById('end-banner').style.display = 'none';
+            document.getElementById('status-pill').textContent = 'Loading...';
+            const url = `http://127.0.0.1:8000/api/map/vector?lat=${params.lat}&lon=${params.lon}&radius=${params.radius}` +
+                `&n_agents=${params.n_agents}&n_targets=${params.n_targets}` +
+                `&n_patrol=${params.n_patrol}&n_aggr=${params.n_aggr}` +
+                `&patrol_speed=${params.patrol_speed}&aggr_speed=${params.aggr_speed}` +
+                `&agent_speed=${params.agent_speed}&detection_radius=${params.detection_radius}&mode=random`;
+            try {
+                await fetch(url);
+                document.getElementById('hud').innerHTML = hudBaseHTML();
+                setMCButtons('idle');
+                document.getElementById('status-pill').textContent = 'READY';
+                map.panTo([params.lat, params.lon]);
+            } catch (e) {
+                document.getElementById('status-pill').textContent = 'DEPLOY ERROR';
+            }
         }
 
         async function mcRestart() {
@@ -584,17 +754,17 @@
                 document.getElementById('end-banner').style.display = 'none';
                 document.getElementById('status-pill').className = '';
                 document.getElementById('status-pill').textContent = 'READY';
-                document.getElementById('hud-score').textContent = '0';
-                document.getElementById('hud-targets').textContent = '-';
-                document.getElementById('hud-enemies').textContent = '-';
                 document.getElementById('topbar-elapsed').textContent = '00:00';
-                if (autoPathLine) { map.removeLayer(autoPathLine); autoPathLine = null; }
-                // GC old markers
+                // Clear map markers
+                for (const id in agentMarkers) { map.removeLayer(agentMarkers[id]); }
+                for (const id in agentPaths) { map.removeLayer(agentPaths[id]); }
                 for (const id in enemyMarkers) { map.removeLayer(enemyMarkers[id]); }
                 for (const id in enemyRings) { map.removeLayer(enemyRings[id]); }
                 for (const id in targetMarkers) { map.removeLayer(targetMarkers[id]); }
+                agentMarkers = {}; agentPaths = {};
                 enemyMarkers = {}; enemyRings = {}; targetMarkers = {};
-                if (robotMarker) { map.removeLayer(robotMarker); robotMarker = null; }
+                lastAgentCount = 0;
+                document.getElementById('hud').innerHTML = hudBaseHTML();
                 setMCButtons('idle');
             } catch (e) { }
         }
@@ -610,6 +780,39 @@
             } catch (e) { }
             document.querySelectorAll('.speed-btn').forEach(b =>
                 b.classList.toggle('active', parseFloat(b.dataset.mult) === mult));
+        }
+
+        // ── HUD helpers ──
+        function hudBaseHTML() {
+            return `
+                <div class="hud-card">
+                    <div class="hud-label">Targets</div>
+                    <div class="hud-value c-warn" id="hud-targets">-</div>
+                </div>
+                <div class="hud-card">
+                    <div class="hud-label">Enemies</div>
+                    <div class="hud-value c-danger" id="hud-enemies">-</div>
+                </div>`;
+        }
+
+        function updateAgentHud(agents) {
+            if (agents.length !== lastAgentCount) {
+                lastAgentCount = agents.length;
+                let html = '';
+                agents.forEach((ag, i) => {
+                    const c = ag.color || AGENT_COLORS[i % 4];
+                    html += `<div class="hud-card" style="border-color:${c}33">
+                        <div class="hud-label" style="color:${c}">Agent ${ag.id}</div>
+                        <div class="hud-value" id="hud-agent-${ag.id}" style="color:${c}">0</div>
+                    </div>`;
+                });
+                html += hudBaseHTML();
+                document.getElementById('hud').innerHTML = html;
+            }
+            agents.forEach(ag => {
+                const el = document.getElementById(`hud-agent-${ag.id}`);
+                if (el) el.textContent = ag.score;
+            });
         }
 
         // ── End Banner ──
@@ -633,39 +836,46 @@
             try {
                 const data = await (await fetch('http://127.0.0.1:8000/api/robot/position')).json();
 
-                // Robot
-                if (data.lat && data.lon) {
-                    const pos = [data.lat, data.lon];
-                    if (!robotMarker) {
-                        robotMarker = L.marker(pos, { icon: robotIcon, zIndexOffset: 1000 })
-                            .addTo(map).bindPopup('SAR Unit');
-                        map.setView(pos, 17);
+                // Multi-agent rendering
+                const agents = data.agents || [];
+                if (agents.length > 0) updateAgentHud(agents);
+
+                const seenAgentIds = new Set();
+                agents.forEach(ag => {
+                    if (!ag.lat || !ag.lon) return;
+                    seenAgentIds.add(ag.id);
+                    const color = ag.color || AGENT_COLORS[ag.id % 4];
+                    const pos = [ag.lat, ag.lon];
+
+                    if (!agentMarkers[ag.id]) {
+                        agentMarkers[ag.id] = L.marker(pos, { icon: agentIcon(color), zIndexOffset: 1000 })
+                            .addTo(map).bindPopup(`Agent #${ag.id}`);
+                        if (ag.id === 0) map.setView(pos, 17);
                     } else {
-                        robotMarker.setLatLng(pos);
+                        agentMarkers[ag.id].setLatLng(pos);
                     }
-                    if (followRobot) map.panTo(pos, { animate: true, duration: 0.5 });
+                    if (ag.id === 0 && followRobot) map.panTo(pos, { animate: true, duration: 0.5 });
+
+                    // Per-agent path
+                    if (ag.auto_path && ag.auto_path.length > 1) {
+                        if (agentPaths[ag.id]) map.removeLayer(agentPaths[ag.id]);
+                        agentPaths[ag.id] = L.polyline(ag.auto_path, {
+                            color, weight: 3, opacity: 0.85, dashArray: '8 4'
+                        }).addTo(map);
+                    } else if (!ag.auto_path || ag.auto_path.length === 0) {
+                        if (agentPaths[ag.id]) { map.removeLayer(agentPaths[ag.id]); delete agentPaths[ag.id]; }
+                    }
+                });
+                // Remove stale agent markers
+                for (const id in agentMarkers) {
+                    if (!seenAgentIds.has(parseInt(id))) {
+                        map.removeLayer(agentMarkers[id]); delete agentMarkers[id];
+                        if (agentPaths[id]) { map.removeLayer(agentPaths[id]); delete agentPaths[id]; }
+                    }
                 }
 
-                // Auto-path
-                if (data.auto_path && data.auto_path.length > 1) {
-                    if (autoPathLine) map.removeLayer(autoPathLine);
-                    autoPathLine = L.polyline(data.auto_path, {
-                        color: '#22c55e', weight: 3, opacity: 0.85,
-                        dashArray: '8 4'
-                    }).addTo(map);
-                } else if (autoPathLine && (!data.auto_path || data.auto_path.length === 0)) {
-                    map.removeLayer(autoPathLine); autoPathLine = null;
-                }
-
-                // HUD + status pill
+                // Status pill + HUD (use first agent for mode display if available)
                 if (data.score !== undefined) {
-                    document.getElementById('hud-score').textContent = data.score;
-                    const modeEl = document.getElementById('hud-mode');
-                    if (data.escape_mode) {
-                        modeEl.textContent = 'ESCAPE'; modeEl.className = 'hud-value c-danger';
-                    } else {
-                        modeEl.textContent = 'PURSUE'; modeEl.className = 'hud-value c-good';
-                    }
                     const pill = document.getElementById('status-pill');
                     pill.className = '';
                     if (data.game_over) {
@@ -675,7 +885,7 @@
                         if (!missionDone) showEndBanner(data.status, data.score);
                     } else if (data.escape_mode) {
                         pill.textContent = 'EVADING'; pill.classList.add('warn');
-                    } else if (data.lat) {
+                    } else if (agents.length > 0 && agents[0].lat) {
                         pill.textContent = 'ACTIVE'; pill.classList.add('safe');
                     } else {
                         pill.textContent = 'STANDBY';
@@ -684,20 +894,20 @@
 
                 // Enemies
                 if (data.enemies) {
-                    document.getElementById('hud-enemies').textContent = data.enemies.length;
+                    const hudEn = document.getElementById('hud-enemies');
+                    if (hudEn) hudEn.textContent = data.enemies.length;
                     const seenIds = new Set();
                     data.enemies.forEach(e => {
                         seenIds.add(e.id);
                         const color = e.type === 'aggressive' ? '#ef4444' : '#a855f7';
-                        const radius = e.type === 'aggressive' ? 7 : 5;
                         const pos = [e.lat, e.lon];
                         if (!enemyMarkers[e.id]) {
-                            enemyMarkers[e.id] = L.circleMarker(pos, { color, fillColor: color, fillOpacity: 0.9, radius, weight: 2 })
+                            enemyMarkers[e.id] = L.circleMarker(pos, { color, fillColor: color, fillOpacity: 0.9, radius: e.type === 'aggressive' ? 7 : 5, weight: 2 })
                                 .addTo(map).bindPopup(`Enemy #${e.id} (${e.type})`);
                             enemyRings[e.id] = L.circle(pos, { radius: e.detection_radius_m || 50, color, fillColor: color, fillOpacity: 0.04, weight: 1, dashArray: '5 3' }).addTo(map);
                         } else {
-                            enemyMarkers[e.id].setLatLng(pos).setStyle({ color, fillColor: color, radius });
-                            enemyRings[e.id].setLatLng(pos).setStyle({ color, fillColor: color });
+                            enemyMarkers[e.id].setLatLng(pos).setStyle({ color, fillColor: color });
+                            enemyRings[e.id].setLatLng(pos);
                         }
                     });
                     for (const id in enemyMarkers) if (!seenIds.has(parseInt(id))) {
@@ -708,7 +918,8 @@
 
                 // Targets
                 if (data.targets) {
-                    document.getElementById('hud-targets').textContent = data.targets.length;
+                    const hudTg = document.getElementById('hud-targets');
+                    if (hudTg) hudTg.textContent = data.targets.length;
                     const seenTids = new Set(data.targets.map(t => t.id));
                     data.targets.forEach(t => {
                         if (!targetMarkers[t.id])
@@ -744,7 +955,7 @@
         }
 
         setMCButtons('idle');
-        syncState();
+        loadMapInfo();   // populate deploy panel + sync button state from server
         poll();
         setInterval(poll, 200);
         setInterval(pollStats, 1000);
