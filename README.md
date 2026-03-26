@@ -34,7 +34,7 @@ The key design principle is **separation of concerns**: the frontend is 100% sta
 └────────────────────────────────────────────────────────────────┘
 ```
 
-> **Dev Note on data directories:** `Backend/data/stats/`, `Backend/data/scenarios/`, and `Backend/data/osmnx_cache/` are **not tracked in git** — they are created automatically by the backend at runtime. You do not need to create them manually.
+> **Note on data directories:** `Backend/data/stats/`, `Backend/data/scenarios/`, and `Backend/data/osmnx_cache/` are **not tracked in git** — they are created automatically by the backend at runtime. You do not need to create them manually.
 
 ---
 
