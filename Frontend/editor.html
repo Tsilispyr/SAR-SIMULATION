@@ -312,8 +312,33 @@
         </div>
 
         <div class="section">
+            <h2>Mission Area</h2>
+            <div style="font-size:10px;color:var(--muted);margin-bottom:6px;">Click map to set centre</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:8px;">
+                <div class="count-item">
+                    <div class="label">Lat</div>
+                    <div class="val" id="ed-lat" style="font-size:11px;">38.9000</div>
+                </div>
+                <div class="count-item">
+                    <div class="label">Lon</div>
+                    <div class="val" id="ed-lon" style="font-size:11px;">22.4330</div>
+                </div>
+            </div>
+            <div style="font-size:10px;color:var(--muted);margin-bottom:3px;">Radius (m): <span id="ed-radius-val" style="color:var(--accent);font-weight:700;">1000</span></div>
+            <input type="range" id="ed-radius" min="200" max="5000" step="100" value="1000"
+                oninput="document.getElementById('ed-radius-val').textContent=this.value;"
+                style="width:100%;cursor:pointer;margin-bottom:10px;">
+
+            <h2>Geofence Boundary</h2>
+            <button class="sb-btn" id="btn-geofence" onclick="toggleGeofenceMode()">Draw Geofence</button>
+            <button class="sb-btn red" onclick="clearGeofence()" style="margin-top:2px;">Clear Geofence</button>
+            <div id="geofence-hint" style="font-size:10px;color:var(--muted);margin-top:4px;min-height:14px;">No geofence set (agents roam freely)</div>
+        </div>
+
+        <div class="section">
             <h2>Deploy</h2>
-            <button class="sb-btn accent" onclick="deployCustom()">Deploy Custom Mission</button>
+            <button class="sb-btn accent" onclick="deployCustom()" id="ed-deploy-btn">Deploy Custom Mission</button>
+            <div id="ed-deploy-status" style="font-size:10px;color:var(--muted);margin-top:5px;min-height:14px;"></div>
             <a href="index.html" class="sb-btn"
                 style="display:block;text-align:center;text-decoration:none;margin-top:4px;">← Back to Control</a>
         </div>
@@ -324,9 +349,23 @@
     <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
     <script>
         const API = 'http://127.0.0.1:8000';
+        let editorLat = 38.900, editorLon = 22.433;
+        let centrePinMarker = null, centreCircle = null;
+
         const map = L.map('map', { zoomControl: false }).setView([38.900, 22.433], 15);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, className: 'map-tiles' }).addTo(map);
         L.control.zoom({ position: 'topright' }).addTo(map);
+
+        function updateCentreMarker(lat, lon) {
+            editorLat = lat; editorLon = lon;
+            document.getElementById('ed-lat').textContent = lat.toFixed(5);
+            document.getElementById('ed-lon').textContent = lon.toFixed(5);
+            if (centrePinMarker) map.removeLayer(centrePinMarker);
+            centrePinMarker = L.circleMarker([lat, lon], {
+                radius: 6, color: 'var(--accent)', fillColor: 'var(--accent)',
+                fillOpacity: 1, weight: 2
+            }).addTo(map).bindTooltip('Mission Centre');
+        }
 
         const TOOL_META = {
             agent: { label: 'Agent Start', color: '#3d78ff', radius: 10 },
@@ -394,8 +433,10 @@
         }
 
         map.on('click', async (e) => {
-            if (currentTool === 'erase') return;
             const { lat, lng: lon } = e.latlng;
+            if (_geofenceMode) { handleGeofenceClick(e); return; }
+            if (currentTool === 'erase') return;
+            updateCentreMarker(lat, lon);
             try {
                 const res = await fetch(`${API}/api/editor/place`, {
                     method: 'POST',
@@ -465,11 +506,43 @@
         }
 
         async function deployCustom() {
+            if (placements.length === 0) { alert('Place at least one entity before deploying.'); return; }
+            const btn = document.getElementById('ed-deploy-btn');
+            const status = document.getElementById('ed-deploy-status');
+            btn.disabled = true; btn.textContent = 'Deploying...';
+            status.textContent = 'Syncing editor state...';
             await syncEditorState();
-            window.location.href = 'index.html';
-            // Signal to index.html to use mode=custom — user clicks Deploy Mission there
-            localStorage.setItem('sar_deploy_mode', 'custom');
-            alert('Editor state saved. In Mission Control, click "Deploy Mission" to launch with these placements.\n(Tip: The Deploy button will use your exact placements.)');
+            
+            if (_geofencePts.length >= 3) {
+                try {
+                    await fetch(`${API}/api/sim/geofence`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ points: _geofencePts.map(p => ({ lat: p[0], lon: p[1] })) })
+                    });
+                } catch(e) {}
+            } else {
+                try { await fetch(`${API}/api/sim/geofence`, { method: 'DELETE' }); } catch(e) {}
+            }
+
+            const radius = parseInt(document.getElementById('ed-radius').value);
+            const url = `${API}/api/map/vector?lat=${editorLat}&lon=${editorLon}&radius=${radius}` +
+                `&n_patrol=3&n_aggr=2&n_targets=5&patrol_speed=2.5&aggr_speed=4.5` +
+                `&agent_speed=6&n_agents=1&detection_radius=50&mode=custom`;
+            try {
+                status.textContent = 'Loading OSM graph...';
+                const res = await fetch(url);
+                if (res.ok) {
+                    status.textContent = 'Deployed! Redirecting...';
+                    setTimeout(() => { window.location.href = 'mission.html'; }, 600);
+                } else {
+                    status.textContent = 'Server error — check backend.';
+                    btn.disabled = false; btn.textContent = 'Deploy Custom Mission';
+                }
+            } catch (e) {
+                status.textContent = 'Connection failed — is backend running?';
+                btn.disabled = false; btn.textContent = 'Deploy Custom Mission';
+            }
         }
 
         async function loadScenarioList() {
@@ -485,6 +558,64 @@
                     sel.appendChild(opt);
                 });
             } catch (e) { }
+        }
+
+        // ── Geofence Draw Tool ──
+        var _geofencePts = [];
+        var _geofenceMarkers = [];
+        var _geofenceLine = null;
+        var _geofencePoly = null;
+        var _geofenceMode = false;
+
+        function toggleGeofenceMode() {
+            _geofenceMode = !_geofenceMode;
+            var btn = document.getElementById('btn-geofence');
+            if (_geofenceMode) {
+                btn.classList.add('active');
+                btn.textContent = 'Stop Drawing (dbl-click closes)';
+                map.getContainer().style.cursor = 'crosshair';
+                map.on('dblclick', closeGeofencePolygon);
+                document.getElementById('geofence-hint').textContent = 'Click to add vertex — double-click to close';
+            } else {
+                btn.classList.remove('active');
+                btn.textContent = 'Draw Geofence';
+                map.getContainer().style.cursor = 'crosshair'; // back to normal tool
+                map.off('dblclick', closeGeofencePolygon);
+            }
+        }
+
+        function handleGeofenceClick(e) {
+            L.DomEvent.stopPropagation(e);
+            _geofencePts.push([e.latlng.lat, e.latlng.lng]);
+            var dot = L.circleMarker([e.latlng.lat, e.latlng.lng], {
+                radius: 5, color: '#22c55e', fillColor: '#22c55e', fillOpacity: 1, weight: 2
+            }).addTo(map);
+            _geofenceMarkers.push(dot);
+            if (_geofenceLine) map.removeLayer(_geofenceLine);
+            if (_geofencePts.length >= 2)
+                _geofenceLine = L.polyline(_geofencePts, { color: '#22c55e', weight: 2, dashArray: '6 3' }).addTo(map);
+            document.getElementById('geofence-hint').textContent = `${_geofencePts.length} vertices — double-click to close`;
+        }
+
+        function closeGeofencePolygon(e) {
+            L.DomEvent.stopPropagation(e);
+            if (_geofencePts.length < 3) return;
+            if (_geofenceLine) { map.removeLayer(_geofenceLine); _geofenceLine = null; }
+            if (_geofencePoly) map.removeLayer(_geofencePoly);
+            _geofencePoly = L.polygon(_geofencePts, {
+                color: '#22c55e', weight: 2, fillColor: '#22c55e', fillOpacity: 0.10, dashArray: '8 4'
+            }).addTo(map);
+            document.getElementById('geofence-hint').textContent = `Geofence set: ${_geofencePts.length} pts`;
+            toggleGeofenceMode();
+        }
+
+        function clearGeofence() {
+            _geofencePts = [];
+            _geofenceMarkers.forEach(m => map.removeLayer(m)); _geofenceMarkers = [];
+            if (_geofenceLine) { map.removeLayer(_geofenceLine);  _geofenceLine = null; }
+            if (_geofencePoly) { map.removeLayer(_geofencePoly);  _geofencePoly = null; }
+            document.getElementById('geofence-hint').textContent = 'No geofence set (agents roam freely)';
+            fetch(`${API}/api/sim/geofence`, { method: 'DELETE' }).catch(() => {});
         }
 
         // Load existing editor state from backend on open

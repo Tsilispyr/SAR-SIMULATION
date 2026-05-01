@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAR Robot Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg: #080c10;
+            --surface: rgba(14, 20, 30, 0.96);
+            --border: rgba(40, 70, 100, 0.7);
+            --accent: #00d4ff;
+            --green: #22c55e;
+            --yellow: #f59e0b;
+            --red: #ef4444;
+            --purple: #a855f7;
+            --text: #cdd6f4;
+            --muted: #6b7c9a;
+            --grid-line: rgba(0, 212, 255, 0.08);
+        }
+
+        body {
+            background: var(--bg);
+            font-family: 'Share Tech Mono', monospace;
+            color: var(--text);
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Scan-line effect overlay */
+        body::after {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 2px,
+                rgba(0, 0, 0, 0.04) 2px,
+                rgba(0, 0, 0, 0.04) 4px
+            );
+            pointer-events: none;
+            z-index: 9999;
+        }
+
+        /* TOP BAR */
+        #topbar {
+            height: 46px;
+            background: rgba(0, 212, 255, 0.05);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 0 18px;
+            flex-shrink: 0;
+        }
+
+        #topbar h1 {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 12px;
+            font-weight: 900;
+            color: var(--accent);
+            letter-spacing: 3px;
+            text-transform: uppercase;
+        }
+
+        .top-sep { flex: 1; }
+
+        #status-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--muted);
+            box-shadow: 0 0 6px var(--muted);
+            animation: blink 2s infinite;
+        }
+
+        #status-dot.live {
+            background: var(--green);
+            box-shadow: 0 0 10px var(--green);
+        }
+
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+        #status-text {
+            font-size: 11px;
+            color: var(--muted);
+        }
+
+        #status-text.live { color: var(--green); }
+
+        #agent-select {
+            background: rgba(0, 212, 255, 0.08);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text);
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 11px;
+            padding: 4px 8px;
+        }
+
+        .top-btn {
+            font-size: 11px;
+            padding: 4px 10px;
+            border-radius: 5px;
+            border: 1px solid var(--border);
+            background: rgba(255,255,255,.05);
+            color: var(--text);
+            cursor: pointer;
+            text-decoration: none;
+            transition: .2s;
+        }
+
+        .top-btn:hover { background: rgba(255,255,255,.1); }
+
+        /* GRID LAYOUT */
+        #main-grid {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1fr 420px;
+            grid-template-rows: 1fr auto;
+            gap: 10px;
+            padding: 10px;
+            min-height: 0;
+        }
+
+        .panel {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .panel-header {
+            padding: 8px 14px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+
+        .panel-title {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 2.5px;
+            text-transform: uppercase;
+            color: var(--accent);
+        }
+
+        .panel-tag {
+            font-size: 9px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .tag-cam { border-color: var(--accent); color: var(--accent); }
+        .tag-lidar { border-color: var(--green); color: var(--green); }
+        .tag-data { border-color: var(--purple); color: var(--purple); }
+
+        /* CAMERA PANEL */
+        #cam-panel { grid-column: 1; grid-row: 1; }
+
+        #cam-canvas {
+            flex: 1;
+            width: 100%;
+            display: block;
+        }
+
+        /* LIDAR PANEL */
+        #lidar-panel { grid-column: 2; grid-row: 1; }
+
+        #lidar-canvas {
+            flex: 1;
+            width: 100%;
+            display: block;
+        }
+
+        /* TELEMETRY PANEL */
+        #tele-panel {
+            grid-column: 1 / -1;
+            grid-row: 2;
+            height: 180px;
+            flex-direction: row;
+            gap: 0;
+        }
+
+        .tele-col {
+            flex: 1;
+            padding: 10px 14px;
+            border-right: 1px solid var(--border);
+            overflow-y: auto;
+        }
+
+        .tele-col:last-child { border-right: none; }
+
+        .tele-title {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 8px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: var(--muted);
+            margin-bottom: 8px;
+        }
+
+        .tele-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            padding: 3px 0;
+            border-bottom: 1px solid rgba(40,70,100,0.2);
+        }
+
+        .tele-row:last-child { border-bottom: none; }
+        .tele-label { color: var(--muted); }
+        .tele-val { color: var(--text); font-weight: 700; }
+        .tele-val.green { color: var(--green); }
+        .tele-val.red { color: var(--red); }
+        .tele-val.yellow { color: var(--yellow); }
+
+        .detect-entry {
+            font-size: 10px;
+            padding: 3px 6px;
+            border-radius: 4px;
+            margin-bottom: 3px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .detect-entry.aggr { background: rgba(239,68,68,0.12); color: var(--red); border-left: 2px solid var(--red); }
+        .detect-entry.patr { background: rgba(245,158,11,0.12); color: var(--yellow); border-left: 2px solid var(--yellow); }
+        .detect-entry.none { color: var(--muted); font-style: italic; }
+
+        .detect-badge {
+            font-size: 8px; padding: 1px 5px; border-radius: 3px;
+            background: rgba(255,255,255,0.1); font-family:'Orbitron',sans-serif;
+        }
+
+        /* decision log row */
+        #decision-log {
+            font-size: 10px; line-height: 1.7; color: var(--muted);
+        }
+        #decision-log .d-active { color: var(--accent); }
+        #decision-log .d-escape { color: var(--red); }
+        #decision-log .d-corner { color: var(--yellow); }
+        #decision-log .d-ok { color: var(--green); }
+
+        /* Heading arrow SVG */
+        .heading-readout {
+            font-size: 28px; font-family:'Orbitron',sans-serif; font-weight:900;
+            color: var(--accent); text-align:center; margin-top: 4px;
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+        /* Corner sweep indicator */
+        #corner-indicator {
+            display: none;
+            position: fixed;
+            top: 50px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 6px 20px;
+            border-radius: 6px;
+            background: rgba(245,158,11,0.2);
+            border: 1px solid var(--yellow);
+            color: var(--yellow);
+            font-family: 'Orbitron', sans-serif;
+            font-size: 11px;
+            letter-spacing: 2px;
+            z-index: 100;
+            animation: blink 0.8s infinite;
+        }
+
+        /* Faint grid background */
+        .panel {
+            background-image:
+                linear-gradient(var(--grid-line) 1px, transparent 1px),
+                linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
+                var(--surface);
+            background-size: 40px 40px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="topbar">
+    <h1>SAR // Robot Dashboard</h1>
+    <span id="status-dot"></span>
+    <span id="status-text">NO SIGNAL</span>
+    <label for="agent-select" style="font-size:11px; color:var(--muted)">AGENT:</label>
+    <select id="agent-select" onchange="selectAgent(this.value)">
+        <option value="0">Agent 0</option>
+        <option value="1">Agent 1</option>
+        <option value="2">Agent 2</option>
+        <option value="3">Agent 3</option>
+    </select>
+    <div class="top-sep"></div>
+    <span id="topbar-score" style="font-family:'Orbitron',sans-serif; font-size:13px; color:var(--accent)">SCORE: 0</span>
+    <span id="topbar-decision" style="font-size:10px; color:var(--muted); max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">—</span>
+    <div class="top-sep"></div>
+    <a class="top-btn" href="mission.html" target="_blank">↗ Map View</a>
+    <a class="top-btn" href="index.html">← Control</a>
+</div>
+
+<div id="corner-indicator">⚠ CORNER PEEK ACTIVE</div>
+
+<div id="main-grid">
+    <!-- CAMERA PANEL -->
+    <div class="panel" id="cam-panel">
+        <div class="panel-header">
+            <span class="panel-title">Camera View</span>
+            <span class="panel-tag tag-cam">90° FOV</span>
+            <span class="panel-tag tag-cam" id="cam-range-tag">Range: 50m</span>
+            <div class="top-sep"></div>
+            <span style="font-size:10px; color:var(--muted)" id="cam-detect-count">No detections</span>
+        </div>
+        <canvas id="cam-canvas"></canvas>
+    </div>
+
+    <!-- LIDAR PANEL -->
+    <div class="panel" id="lidar-panel">
+        <div class="panel-header">
+            <span class="panel-title">LiDAR Array</span>
+            <span class="panel-tag tag-lidar">360° / 10°Step</span>
+            <div class="top-sep"></div>
+            <span style="font-size:10px; color:var(--muted)" id="lidar-min-range">—</span>
+        </div>
+        <canvas id="lidar-canvas"></canvas>
+    </div>
+
+    <!-- TELEMETRY STRIP -->
+    <div class="panel" id="tele-panel">
+        <div class="tele-col" id="tele-status">
+            <div class="tele-title">Agent Telemetry</div>
+            <div class="tele-row"><span class="tele-label">ID</span><span class="tele-val" id="t-id">—</span></div>
+            <div class="tele-row"><span class="tele-label">Score</span><span class="tele-val green" id="t-score">—</span></div>
+            <div class="tele-row"><span class="tele-label">Heading</span><span class="tele-val" id="t-heading">—</span></div>
+            <div class="tele-row"><span class="tele-label">Mode</span><span class="tele-val" id="t-mode">—</span></div>
+            <div class="tele-row"><span class="tele-label">Active</span><span class="tele-val" id="t-active">—</span></div>
+        </div>
+        <div class="tele-col" id="tele-detections">
+            <div class="tele-title">Camera Detections</div>
+            <div id="detection-list"></div>
+        </div>
+        <div class="tele-col" id="tele-decision">
+            <div class="tele-title">Decision Log</div>
+            <div id="decision-log"></div>
+        </div>
+        <div class="tele-col" id="tele-lidar-stats">
+            <div class="tele-title">LiDAR Stats</div>
+            <div class="tele-row"><span class="tele-label">Min Range</span><span class="tele-val yellow" id="t-lidar-min">—</span></div>
+            <div class="tele-row"><span class="tele-label">Max Range</span><span class="tele-val green" id="t-lidar-max">—</span></div>
+            <div class="tele-row"><span class="tele-label">Rays</span><span class="tele-val" id="t-lidar-rays">36</span></div>
+            <div class="tele-row"><span class="tele-label">Blocked</span><span class="tele-val red" id="t-lidar-blocked">0</span></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const API = 'http://127.0.0.1:8000';
+    const POLL_MS = 200;
+    const FOV_DEG = 90;
+    const LIDAR_MAX = 30;
+
+    let selectedAgentId = 0;
+    let latestAgents = [];
+    let decisionHistory = [];
+
+    // ── Canvas setup ──
+    const camCanvas = document.getElementById('cam-canvas');
+    const camCtx = camCanvas.getContext('2d');
+    const lidarCanvas = document.getElementById('lidar-canvas');
+    const lidarCtx = lidarCanvas.getContext('2d');
+
+    function resizeCanvases() {
+        const cam = document.getElementById('cam-panel');
+        const lid = document.getElementById('lidar-panel');
+        camCanvas.width = cam.clientWidth;
+        camCanvas.height = cam.clientHeight - 36;
+        lidarCanvas.width = lid.clientWidth;
+        lidarCanvas.height = lid.clientHeight - 36;
+    }
+
+    window.addEventListener('resize', resizeCanvases);
+    setTimeout(resizeCanvases, 100);
+
+    function selectAgent(id) {
+        selectedAgentId = parseInt(id);
+    }
+
+    // ── CAMERA RENDERING ──
+    function drawCamera(detections, heading) {
+        const cam = document.getElementById('cam-panel');
+        if (camCanvas.width !== cam.clientWidth || camCanvas.height !== Math.max(0, cam.clientHeight - 36)) {
+            camCanvas.width = cam.clientWidth;
+            camCanvas.height = Math.max(0, cam.clientHeight - 36);
+        }
+        
+        const W = camCanvas.width, H = camCanvas.height;
+        if (!W || !H) return;
+        camCtx.clearRect(0, 0, W, H);
+
+        // Sky gradient
+        const sky = camCtx.createLinearGradient(0, 0, 0, H * 0.55);
+        sky.addColorStop(0, '#010b14');
+        sky.addColorStop(1, '#0a1a28');
+        camCtx.fillStyle = sky;
+        camCtx.fillRect(0, 0, W, H * 0.6);
+
+        // Ground gradient
+        const ground = camCtx.createLinearGradient(0, H * 0.55, 0, H);
+        ground.addColorStop(0, '#121820');
+        ground.addColorStop(1, '#070d12');
+        camCtx.fillStyle = ground;
+        camCtx.fillRect(0, H * 0.55, W, H);
+
+        // Horizon line
+        camCtx.strokeStyle = 'rgba(0,212,255,0.2)';
+        camCtx.lineWidth = 1;
+        camCtx.beginPath();
+        camCtx.moveTo(0, H * 0.58);
+        camCtx.lineTo(W, H * 0.58);
+        camCtx.stroke();
+
+        // Perspective grid road
+        camCtx.strokeStyle = 'rgba(0,212,255,0.06)';
+        camCtx.lineWidth = 1;
+        for (let i = 0; i < 8; i++) {
+            const t = i / 8;
+            const y = H * 0.58 + t * H * 0.4;
+            const xOff = t * W * 0.35;
+            camCtx.beginPath();
+            camCtx.moveTo(xOff, y);
+            camCtx.lineTo(W - xOff, y);
+            camCtx.stroke();
+        }
+
+        // Vanishing lines
+        camCtx.strokeStyle = 'rgba(0,212,255,0.08)';
+        for (let i = -4; i <= 4; i++) {
+            camCtx.beginPath();
+            camCtx.moveTo(W / 2, H * 0.58);
+            camCtx.lineTo(W / 2 + i * W * 0.4, H);
+            camCtx.stroke();
+        }
+
+        // FOV cone lines
+        camCtx.strokeStyle = 'rgba(0,212,255,0.25)';
+        camCtx.lineWidth = 1;
+        camCtx.setLineDash([4, 6]);
+        camCtx.beginPath();
+        camCtx.moveTo(W / 2, H * 0.58);
+        camCtx.lineTo(0, H * 0.3);
+        camCtx.stroke();
+        camCtx.beginPath();
+        camCtx.moveTo(W / 2, H * 0.58);
+        camCtx.lineTo(W, H * 0.3);
+        camCtx.stroke();
+        camCtx.setLineDash([]);
+
+        // Crosshair
+        camCtx.strokeStyle = 'rgba(0,212,255,0.4)';
+        camCtx.lineWidth = 1;
+        camCtx.beginPath();
+        camCtx.moveTo(W / 2 - 15, H * 0.58);
+        camCtx.lineTo(W / 2 + 15, H * 0.58);
+        camCtx.stroke();
+        camCtx.beginPath();
+        camCtx.moveTo(W / 2, H * 0.58 - 15);
+        camCtx.lineTo(W / 2, H * 0.58 + 15);
+        camCtx.stroke();
+
+        // Heading label
+        camCtx.fillStyle = 'rgba(0,212,255,0.5)';
+        camCtx.font = '10px Share Tech Mono';
+        camCtx.textAlign = 'center';
+        camCtx.fillText(`HDG: ${Math.round(heading)}°`, W / 2, 20);
+
+        // Detections as YOLO-style boxes
+        if (detections && detections.length > 0) {
+            detections.forEach((d, i) => {
+                const isAggr = d.type === 'aggressive';
+                const color = isAggr ? '#ef4444' : (d.type === 'patrol' ? '#f59e0b' : '#22c55e');
+
+                // Project based on angle and distance
+                const normAngle = d.angle_deg / (FOV_DEG / 2); // -1 to 1
+                const normDist = Math.max(0, 1 - (d.dist_m / 50)); // 0=far, 1=close
+
+                // Box position in camera space
+                const cx = W / 2 + normAngle * W * 0.42;
+                const horizon = H * 0.58;
+                const cy = horizon - normDist * H * 0.18;
+
+                const boxW = 40 + normDist * 60;
+                const boxH = boxW * 1.4;
+
+                camCtx.strokeStyle = color;
+                camCtx.lineWidth = 1.5;
+                camCtx.strokeRect(cx - boxW / 2, cy - boxH / 2, boxW, boxH);
+
+                // Corner brackets
+                const bs = 8;
+                camCtx.lineWidth = 2.5;
+                [[cx-boxW/2, cy-boxH/2,1,1],[cx+boxW/2, cy-boxH/2,-1,1],
+                 [cx-boxW/2, cy+boxH/2,1,-1],[cx+boxW/2, cy+boxH/2,-1,-1]].forEach(([x,y,sx,sy])=>{
+                    camCtx.beginPath(); camCtx.moveTo(x, y+sy*bs); camCtx.lineTo(x,y); camCtx.lineTo(x+sx*bs, y); camCtx.stroke();
+                });
+
+                // Label
+                camCtx.fillStyle = color;
+                camCtx.font = 'bold 10px Share Tech Mono';
+                camCtx.textAlign = 'left';
+                const label = `${d.type.toUpperCase().substring(0,4)} ${d.dist_m}m | ${d.angle_deg > 0 ? '+' : ''}${d.angle_deg}°`;
+                camCtx.fillText(label, cx - boxW / 2, cy - boxH / 2 - 4);
+
+                // Confidence bar
+                const conf = 1 - (d.dist_m / 50);
+                camCtx.fillStyle = `${color}44`;
+                camCtx.fillRect(cx - boxW/2, cy + boxH/2 + 2, boxW * conf, 3);
+                camCtx.strokeStyle = color;
+                camCtx.lineWidth = 0.5;
+                camCtx.strokeRect(cx - boxW/2, cy + boxH/2 + 2, boxW, 3);
+            });
+        }
+
+        // YOLO watermark
+        camCtx.fillStyle = 'rgba(0,212,255,0.15)';
+        camCtx.font = '9px Share Tech Mono';
+        camCtx.textAlign = 'right';
+        camCtx.fillText('SAR-YOLO v1 SIMULATED', W - 8, H - 8);
+    }
+
+    // ── LIDAR RENDERING ──
+    function drawLidar(ranges, heading, detections) {
+        const lid = document.getElementById('lidar-panel');
+        if (lidarCanvas.width !== lid.clientWidth || lidarCanvas.height !== Math.max(0, lid.clientHeight - 36)) {
+            lidarCanvas.width = lid.clientWidth;
+            lidarCanvas.height = Math.max(0, lid.clientHeight - 36);
+        }
+
+        const W = lidarCanvas.width, H = lidarCanvas.height;
+        if (!W || !H || !ranges || ranges.length === 0) return;
+
+        lidarCtx.clearRect(0, 0, W, H);
+
+        const cx = W / 2, cy = H / 2;
+        const maxR = Math.min(W, H) / 2 - 18;
+
+        // Background radial gradient
+        const grad = lidarCtx.createRadialGradient(cx, cy, 0, cx, cy, maxR);
+        grad.addColorStop(0, 'rgba(0, 212, 255, 0.03)');
+        grad.addColorStop(1, 'rgba(0, 212, 255, 0)');
+        lidarCtx.fillStyle = grad;
+        lidarCtx.beginPath();
+        lidarCtx.arc(cx, cy, maxR, 0, 2 * Math.PI);
+        lidarCtx.fill();
+
+        // Range rings
+        [15, 30].forEach(rng => {
+            const pr = (rng / LIDAR_MAX) * maxR;
+            lidarCtx.beginPath();
+            lidarCtx.arc(cx, cy, pr, 0, 2 * Math.PI);
+            lidarCtx.strokeStyle = 'rgba(0, 212, 255, 0.12)';
+            lidarCtx.lineWidth = 1;
+            lidarCtx.stroke();
+            lidarCtx.fillStyle = 'rgba(0,212,255,0.25)';
+            lidarCtx.font = '8px Share Tech Mono';
+            lidarCtx.textAlign = 'center';
+            lidarCtx.fillText(`${rng}m`, cx, cy - pr + 10);
+        });
+
+        // Cardinal lines
+        lidarCtx.strokeStyle = 'rgba(0, 212, 255, 0.08)';
+        lidarCtx.lineWidth = 1;
+        for (let a = 0; a < 360; a += 45) {
+            const rad = (a * Math.PI) / 180;
+            lidarCtx.beginPath();
+            lidarCtx.moveTo(cx, cy);
+            lidarCtx.lineTo(cx + Math.cos(rad) * maxR, cy + Math.sin(rad) * maxR);
+            lidarCtx.stroke();
+        }
+
+        // LiDAR swept area (filled polygon)
+        lidarCtx.beginPath();
+        ranges.forEach((r, i) => {
+            const worldAngle = (heading + i * 10);
+            const rad = ((worldAngle - 90) * Math.PI) / 180;
+            const pr = (Math.min(r, LIDAR_MAX) / LIDAR_MAX) * maxR;
+            const px = cx + Math.cos(rad) * pr;
+            const py = cy + Math.sin(rad) * pr;
+            if (i === 0) lidarCtx.moveTo(px, py);
+            else lidarCtx.lineTo(px, py);
+        });
+        lidarCtx.closePath();
+        lidarCtx.fillStyle = 'rgba(34, 197, 94, 0.08)';
+        lidarCtx.fill();
+        lidarCtx.strokeStyle = '#22c55e';
+        lidarCtx.lineWidth = 1.2;
+        lidarCtx.stroke();
+
+        // Hit points
+        ranges.forEach((r, i) => {
+            if (r >= LIDAR_MAX - 0.1) return; // skip max-range (open)
+            const worldAngle = (heading + i * 10);
+            const rad = ((worldAngle - 90) * Math.PI) / 180;
+            const pr = (r / LIDAR_MAX) * maxR;
+            const px = cx + Math.cos(rad) * pr;
+            const py = cy + Math.sin(rad) * pr;
+            lidarCtx.fillStyle = '#22c55eCC';
+            lidarCtx.beginPath();
+            lidarCtx.arc(px, py, 2.5, 0, 2 * Math.PI);
+            lidarCtx.fill();
+        });
+
+        // FOV arc (Camera cone)
+        const fovRad = (FOV_DEG / 2 * Math.PI) / 180;
+        const headRad = ((heading - 90) * Math.PI) / 180;
+        const fovRange = 50 / (LIDAR_MAX) * maxR;
+        lidarCtx.beginPath();
+        lidarCtx.moveTo(cx, cy);
+        lidarCtx.arc(cx, cy, fovRange, headRad - fovRad, headRad + fovRad);
+        lidarCtx.closePath();
+        lidarCtx.fillStyle = 'rgba(0, 212, 255, 0.06)';
+        lidarCtx.fill();
+        lidarCtx.strokeStyle = 'rgba(0, 212, 255, 0.4)';
+        lidarCtx.lineWidth = 1;
+        lidarCtx.stroke();
+
+        // Detection dots in LiDAR space
+        if (detections) {
+            detections.forEach(d => {
+                const abAngle = heading + d.angle_deg;
+                const rad = ((abAngle - 90) * Math.PI) / 180;
+                const pr = (Math.min(d.dist_m, LIDAR_MAX) / LIDAR_MAX) * maxR;
+                const px = cx + Math.cos(rad) * pr;
+                const py = cy + Math.sin(rad) * pr;
+                const col = d.type === 'aggressive' ? '#ef4444' : '#f59e0b';
+                lidarCtx.fillStyle = col;
+                lidarCtx.beginPath();
+                lidarCtx.arc(px, py, 5, 0, 2 * Math.PI);
+                lidarCtx.fill();
+                lidarCtx.strokeStyle = `${col}66`;
+                lidarCtx.lineWidth = 1;
+                lidarCtx.beginPath();
+                lidarCtx.arc(px, py, 10, 0, 2 * Math.PI);
+                lidarCtx.stroke();
+            });
+        }
+
+        // Heading arrow
+        lidarCtx.strokeStyle = '#00d4ff';
+        lidarCtx.lineWidth = 2;
+        lidarCtx.beginPath();
+        lidarCtx.moveTo(cx, cy);
+        const arrowLen = 22;
+        const ax = cx + Math.cos(headRad) * arrowLen;
+        const ay = cy + Math.sin(headRad) * arrowLen;
+        lidarCtx.lineTo(ax, ay);
+        lidarCtx.stroke();
+
+        // Agent center dot
+        lidarCtx.fillStyle = '#00d4ff';
+        lidarCtx.beginPath();
+        lidarCtx.arc(cx, cy, 4, 0, 2 * Math.PI);
+        lidarCtx.fill();
+
+        // Scale label
+        lidarCtx.fillStyle = 'rgba(0,212,255,0.3)';
+        lidarCtx.font = '8px Share Tech Mono';
+        lidarCtx.textAlign = 'left';
+        lidarCtx.fillText(`MAX ${LIDAR_MAX}m`, 8, H - 8);
+    }
+
+    // ── TELEMETRY UPDATE ──
+    function updateTelemetry(ag) {
+        if (!ag) return;
+
+        document.getElementById('t-id').textContent = `Agent ${ag.id}`;
+        document.getElementById('t-score').textContent = ag.score ?? 0;
+        document.getElementById('t-heading').textContent = `${Math.round(ag.heading ?? 0)}°`;
+
+        const modeEl = document.getElementById('t-mode');
+        if (ag.escape_mode) {
+            modeEl.textContent = 'ESCAPE';
+            modeEl.className = 'tele-val red';
+        } else if ((ag.last_decision || '').includes('CORNER')) {
+            modeEl.textContent = 'CORNER PEEK';
+            modeEl.className = 'tele-val yellow';
+        } else {
+            modeEl.textContent = 'NAVIGATE';
+            modeEl.className = 'tele-val green';
+        }
+
+        const activeEl = document.getElementById('t-active');
+        activeEl.textContent = ag.active ? 'ONLINE' : 'INCAPACITATED';
+        activeEl.className = `tele-val ${ag.active ? 'green' : 'red'}`;
+
+        document.getElementById('topbar-score').textContent = `SCORE: ${ag.score ?? 0}`;
+        document.getElementById('topbar-decision').textContent = ag.last_decision ?? '—';
+
+        // Corner indicator
+        const cornerInd = document.getElementById('corner-indicator');
+        if ((ag.last_decision || '').includes('CORNER')) {
+            cornerInd.style.display = 'block';
+        } else {
+            cornerInd.style.display = 'none';
+        }
+
+        // Detection list
+        const dl = document.getElementById('detection-list');
+        const cams = ag.camera || [];
+        document.getElementById('cam-detect-count').textContent =
+            cams.length > 0 ? `${cams.length} detection${cams.length > 1 ? 's' : ''}` : 'No detections';
+        if (cams.length === 0) {
+            dl.innerHTML = '<div class="detect-entry none">No entities in FOV</div>';
+        } else {
+            dl.innerHTML = cams.map(d => `
+                <div class="detect-entry ${d.type === 'aggressive' ? 'aggr' : 'patr'}">
+                    <span>${d.type.toUpperCase()}</span>
+                    <span class="detect-badge">${d.dist_m}m | ${d.angle_deg > 0 ? '+' : ''}${d.angle_deg}°</span>
+                </div>`).join('');
+        }
+
+        // Decision log (rolling)
+        const dec = ag.last_decision || 'IDLE';
+        if (!decisionHistory.length || decisionHistory[decisionHistory.length - 1] !== dec) {
+            decisionHistory.push(dec);
+            if (decisionHistory.length > 6) decisionHistory.shift();
+        }
+        const decEl = document.getElementById('decision-log');
+        decEl.innerHTML = decisionHistory.slice().reverse().map((d, i) => {
+            let cls = i === 0 ? 'd-active' : '';
+            if (d.includes('ESCAPE')) cls = 'd-escape';
+            if (d.includes('CORNER')) cls = 'd-corner';
+            if (d.includes('Target') || d.includes('MANEUVER')) cls = 'd-ok';
+            return `<div class="${cls}">${i === 0 ? '▶ ' : '  '}${d}</div>`;
+        }).join('');
+
+        // LiDAR stats
+        const lidar = ag.lidar || [];
+        if (lidar.length > 0) {
+            const minR = Math.min(...lidar).toFixed(1);
+            const maxR = Math.max(...lidar).toFixed(1);
+            const blocked = lidar.filter(r => r < 5).length;
+            document.getElementById('t-lidar-min').textContent = `${minR}m`;
+            document.getElementById('t-lidar-max').textContent = `${maxR}m`;
+            document.getElementById('t-lidar-blocked').textContent = blocked;
+            document.getElementById('t-lidar-rays').textContent = lidar.length;
+            document.getElementById('lidar-min-range').textContent = `Min: ${minR}m`;
+        }
+    }
+
+    // ── STATUS ──
+    let lastDataMs = 0;
+    function setLive(yes) {
+        const dot = document.getElementById('status-dot');
+        const txt = document.getElementById('status-text');
+        dot.className = yes ? 'live' : '';
+        txt.className = yes ? 'live' : '';
+        txt.textContent = yes ? 'LIVE' : 'NO SIGNAL';
+    }
+
+    // ── POLL LOOP ──
+    async function poll() {
+        try {
+            const res = await fetch(`${API}/api/robot/position`);
+            if (!res.ok) throw new Error('bad response');
+            const data = await res.json();
+            lastDataMs = Date.now();
+            setLive(true);
+
+            latestAgents = data.agents || [];
+
+            // Populate agent selector
+            const sel = document.getElementById('agent-select');
+            if (latestAgents.length !== sel.options.length - 1) {
+                while (sel.options.length > 0) sel.remove(0);
+                latestAgents.forEach(ag => {
+                    const opt = document.createElement('option');
+                    opt.value = ag.id;
+                    opt.text = `Agent ${ag.id}`;
+                    if (ag.id === selectedAgentId) opt.selected = true;
+                    sel.add(opt);
+                });
+            }
+
+            const ag = latestAgents.find(a => a.id === selectedAgentId) || latestAgents[0];
+            if (!ag) return;
+
+            const heading = ag.heading ?? 0;
+            drawCamera(ag.camera || [], heading);
+            drawLidar(ag.lidar || [], heading, ag.camera || []);
+            updateTelemetry(ag);
+
+        } catch (e) {
+            if (Date.now() - lastDataMs > 3000) setLive(false);
+        }
+    }
+
+    setInterval(poll, POLL_MS);
+    poll();
+</script>
+</body>
+</html>

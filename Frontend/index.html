@@ -284,6 +284,29 @@
             color: #f59e0b !important;
             border: 1px solid #b45309;
         }
+
+        /* ---- ADVANCED TOOLS ---- */
+        .adv-tool-btn {
+            width: 100%;
+            padding: 7px 10px;
+            margin-top: 5px;
+            border-radius: 6px;
+            border: 1px solid #555;
+            background: rgba(255,255,255,.06);
+            color: #cdd6f4;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 10px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: .2s;
+        }
+        .adv-tool-btn:hover { background: rgba(255,255,255,.13); }
+        .adv-tool-btn.active-geofence { border-color:#22c55e; color:#22c55e; background:rgba(34,197,94,.12); }
+        .adv-tool-btn.active-waypoint { border-color:#f97316; color:#f97316; background:rgba(249,115,22,.12); }
+        .adv-tool-btn.active-agent-spawn { border-color:#3b82f6; color:#3b82f6; background:rgba(59,130,246,.12); }
+        .adv-tool-btn.clear-btn       { border-color:#ef4444; color:#ef4444; }
+        .adv-hint { font-size:10px; color:#666; margin-top:4px; min-height:14px; }
     </style>
 </head>
 
@@ -368,6 +391,31 @@
             </div>
         </div>
 
+        <!-- ▼ ADVANCED MISSION PLANNING ▼ -->
+        <div class="control-group">
+            <h3>Advanced Planning</h3>
+
+            <div style="font-size:10px;color:#888;margin-bottom:4px;">Geofence Boundary</div>
+            <button id="btn-geofence" class="adv-tool-btn" onclick="toggleGeofenceMode()">Draw Geofence Polygon</button>
+            <button class="adv-tool-btn clear-btn" onclick="clearGeofence()" style="margin-top:3px;">Clear Geofence</button>
+            <div class="adv-hint" id="geofence-hint">No geofence set (agents roam freely)</div>
+
+            <div style="font-size:10px;color:#888;margin-top:10px;margin-bottom:4px;">Waypoint Mode</div>
+            <button id="btn-waypoint" class="adv-tool-btn" onclick="toggleWaypointMode()">Place Waypoints</button>
+            <div style="display:flex;gap:5px;margin-top:3px;">
+                <label style="font-size:10px;color:#888;align-items:center;gap:4px;">
+                    <input type="checkbox" id="wp-loop" style="width:auto;"> Loop
+                </label>
+            </div>
+            <button class="adv-tool-btn clear-btn" onclick="clearWaypoints()" style="margin-top:3px;">Clear Waypoints</button>
+            <div class="adv-hint" id="waypoint-hint">No waypoints set (random mode)</div>
+
+            <div style="font-size:10px;color:#888;margin-top:10px;margin-bottom:4px;">Manual Agent Start</div>
+            <button id="btn-agent-spawn" class="adv-tool-btn" onclick="toggleAgentSpawnMode()">Set Agent Spawn</button>
+            <button class="adv-tool-btn clear-btn" onclick="clearAgentSpawn()" style="margin-top:3px;">Clear Spawn</button>
+            <div class="adv-hint" id="agent-spawn-hint">No manual spawn (centre/random)</div>
+        </div>
+
         <button onclick="sendMapCoordinates()">Deploy Mission</button>
         <button id="btn-mission" onclick="openMission()" disabled>🗺Live Mission View</button>
         <button id="btn-stats" onclick="openStats()" disabled>Open Stats Dashboard</button>
@@ -404,7 +452,7 @@
 
         // Lock-camera control
         var followRobot = false;
-        var camCtrl = L.control({ position: 'topright' });
+        var camCtrl = L.control({ position: 'bottomright' });
         camCtrl.onAdd = function () {
             var div = L.DomUtil.create('div', 'command');
             div.innerHTML = '<form style="background:white;padding:5px;border-radius:4px;font-size:13px;"><input id="followCheckbox" type="checkbox"/> Lock Camera</form>';
@@ -534,6 +582,19 @@
             btn.innerText = 'Loading...'; btn.disabled = true;
             clearMapState();
 
+            // POST geofence if set
+            if (_geofencePts.length >= 3) {
+                try {
+                    await fetch('http://localhost:8000/api/sim/geofence', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ points: _geofencePts.map(p => ({ lat: p[0], lon: p[1] })) })
+                    });
+                } catch(e) { console.warn('Geofence POST failed', e); }
+            } else {
+                try { await fetch('http://localhost:8000/api/sim/geofence', { method: 'DELETE' }); } catch(e) {}
+            }
+
             try { await fetch('http://localhost:8000/api/sim/clear'); } catch (e) { }
 
             var url = `http://localhost:8000/api/map/vector?lat=${selectedLat}&lon=${selectedLon}&radius=${radius}` +
@@ -541,9 +602,28 @@
                 `&patrol_speed=${patrol_speed}&aggr_speed=${aggr_speed}` +
                 `&agent_speed=${agent_speed}&n_agents=${n_agents}` +
                 `&detection_radius=${detect_r}&mode=${mode}`;
+            
+            if (_agentSpawnPt) {
+                url += `&agent_lat=${_agentSpawnPt[0]}&agent_lon=${_agentSpawnPt[1]}`;
+            }
+
             try {
                 let res = await fetch(url);
                 if (res.ok) {
+                    // POST waypoints if set
+                    if (_waypointPts.length >= 2) {
+                        try {
+                            const loop = document.getElementById('wp-loop').checked;
+                            await fetch('http://localhost:8000/api/mission/waypoints', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    waypoints: _waypointPts.map((p, i) => ({ id: i, lat: p[0], lon: p[1], label: `WP${i+1}` })),
+                                    loop
+                                })
+                            });
+                        } catch(e) { console.warn('Waypoint POST failed', e); }
+                    }
                     document.getElementById('status').innerText = `Map loaded (${mode} mode)! Simulation ready.`;
                     document.getElementById('hud').style.display = 'flex';
                     document.getElementById('btn-stats').disabled = false;
@@ -557,6 +637,157 @@
             }
             btn.innerText = 'Deploy Mission'; btn.disabled = false;
         };
+
+        // ── Geofence Draw Tool ──
+        var _geofencePts = [];   // [[lat,lon],...]
+        var _geofenceMarkers = [];
+        var _geofenceLine = null;
+        var _geofencePoly = null;
+        var _geofenceMode = false;
+
+        function toggleGeofenceMode() {
+            // Turn off waypoint mode if on
+            if (_waypointMode) toggleWaypointMode();
+            _geofenceMode = !_geofenceMode;
+            var btn = document.getElementById('btn-geofence');
+            if (_geofenceMode) {
+                btn.classList.add('active-geofence');
+                btn.textContent = 'Stop Drawing (dbl-click closes)';
+                map.getContainer().style.cursor = 'crosshair';
+                map.on('click', handleGeofenceClick);
+                map.on('dblclick', closeGeofencePolygon);
+                document.getElementById('geofence-hint').textContent = 'Click to add vertex — double-click to close polygon';
+            } else {
+                btn.classList.remove('active-geofence');
+                btn.textContent = 'Draw Geofence Polygon';
+                map.getContainer().style.cursor = '';
+                map.off('click', handleGeofenceClick);
+                map.off('dblclick', closeGeofencePolygon);
+            }
+        }
+
+        function handleGeofenceClick(e) {
+            L.DomEvent.stopPropagation(e);
+            _geofencePts.push([e.latlng.lat, e.latlng.lng]);
+            var dot = L.circleMarker([e.latlng.lat, e.latlng.lng], {
+                radius: 5, color: '#22c55e', fillColor: '#22c55e', fillOpacity: 1, weight: 2
+            }).addTo(map);
+            _geofenceMarkers.push(dot);
+            // Redraw line
+            if (_geofenceLine) map.removeLayer(_geofenceLine);
+            if (_geofencePts.length >= 2)
+                _geofenceLine = L.polyline(_geofencePts, { color: '#22c55e', weight: 2, dashArray: '6 3' }).addTo(map);
+            document.getElementById('geofence-hint').textContent = `${_geofencePts.length} vertices — double-click to close`;
+        }
+
+        function closeGeofencePolygon(e) {
+            L.DomEvent.stopPropagation(e);
+            if (_geofencePts.length < 3) { return; }
+            // Remove preview line, draw filled polygon
+            if (_geofenceLine) { map.removeLayer(_geofenceLine); _geofenceLine = null; }
+            if (_geofencePoly) map.removeLayer(_geofencePoly);
+            _geofencePoly = L.polygon(_geofencePts, {
+                color: '#22c55e', weight: 2, fillColor: '#22c55e', fillOpacity: 0.10, dashArray: '8 4'
+            }).addTo(map);
+            document.getElementById('geofence-hint').textContent = `Geofence set: ${_geofencePts.length} pts`;
+            toggleGeofenceMode(); // exit draw mode
+        }
+
+        function clearGeofence() {
+            _geofencePts = [];
+            _geofenceMarkers.forEach(m => map.removeLayer(m)); _geofenceMarkers = [];
+            if (_geofenceLine)  { map.removeLayer(_geofenceLine);  _geofenceLine  = null; }
+            if (_geofencePoly)  { map.removeLayer(_geofencePoly);  _geofencePoly  = null; }
+            document.getElementById('geofence-hint').textContent = 'No geofence set (agents roam freely)';
+            fetch('http://localhost:8000/api/sim/geofence', { method: 'DELETE' }).catch(() => {});
+        }
+
+        // ── Waypoint Tool ──
+        var _waypointPts = [];     // [[lat,lon],...]
+        var _waypointMarkers = [];
+        var _waypointLine = null;
+        var _waypointMode = false;
+
+        function toggleWaypointMode() {
+            if (_geofenceMode) toggleGeofenceMode();
+            _waypointMode = !_waypointMode;
+            var btn = document.getElementById('btn-waypoint');
+            if (_waypointMode) {
+                btn.classList.add('active-waypoint');
+                btn.textContent = 'Stop Placing Waypoints';
+                map.getContainer().style.cursor = 'crosshair';
+                map.on('click', handleWaypointClick);
+                document.getElementById('waypoint-hint').textContent = 'Click map to place waypoints in order';
+            } else {
+                btn.classList.remove('active-waypoint');
+                btn.textContent = 'Place Waypoints';
+                map.getContainer().style.cursor = '';
+                map.off('click', handleWaypointClick);
+            }
+        }
+
+        function handleWaypointClick(e) {
+            L.DomEvent.stopPropagation(e);
+            const idx = _waypointPts.length + 1;
+            _waypointPts.push([e.latlng.lat, e.latlng.lng]);
+            const dot = L.circleMarker([e.latlng.lat, e.latlng.lng], {
+                radius: 7, color: '#f97316', fillColor: '#f97316', fillOpacity: 0.9, weight: 2
+            }).addTo(map).bindTooltip(`WP${idx}`, { permanent: true, direction: 'top', offset: [-3, -8] });
+            _waypointMarkers.push(dot);
+            if (_waypointLine) map.removeLayer(_waypointLine);
+            if (_waypointPts.length >= 2)
+                _waypointLine = L.polyline(_waypointPts, { color: '#f97316', weight: 2, dashArray: '6 3', opacity: 0.7 }).addTo(map);
+            document.getElementById('waypoint-hint').textContent = `${_waypointPts.length} waypoints set`;
+        }
+
+        function clearWaypoints() {
+            _waypointPts = [];
+            _waypointMarkers.forEach(m => map.removeLayer(m)); _waypointMarkers = [];
+            if (_waypointLine) { map.removeLayer(_waypointLine); _waypointLine = null; }
+            document.getElementById('waypoint-hint').textContent = 'No waypoints set (random mode)';
+            fetch('http://localhost:8000/api/mission/waypoints', { method: 'DELETE' }).catch(() => {});
+        }
+
+        // ── Agent Spawn Tool ──
+        var _agentSpawnPt = null; // [lat, lon]
+        var _agentSpawnMarker = null;
+        var _agentSpawnMode = false;
+
+        function toggleAgentSpawnMode() {
+            if (_geofenceMode) toggleGeofenceMode();
+            if (_waypointMode) toggleWaypointMode();
+            _agentSpawnMode = !_agentSpawnMode;
+            var btn = document.getElementById('btn-agent-spawn');
+            if (_agentSpawnMode) {
+                btn.classList.add('active-agent-spawn');
+                btn.textContent = 'Cancel Placement';
+                map.getContainer().style.cursor = 'crosshair';
+                map.on('click', handleAgentSpawnClick);
+                document.getElementById('agent-spawn-hint').textContent = 'Click map to place Agent start position';
+            } else {
+                btn.classList.remove('active-agent-spawn');
+                btn.textContent = 'Set Agent Spawn';
+                map.getContainer().style.cursor = '';
+                map.off('click', handleAgentSpawnClick);
+            }
+        }
+
+        function handleAgentSpawnClick(e) {
+            L.DomEvent.stopPropagation(e);
+            _agentSpawnPt = [e.latlng.lat, e.latlng.lng];
+            if (_agentSpawnMarker) map.removeLayer(_agentSpawnMarker);
+            _agentSpawnMarker = L.circleMarker(_agentSpawnPt, {
+                radius: 8, color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.9, weight: 2
+            }).addTo(map).bindTooltip(`Agent Start`, { permanent: true, direction: 'top', offset: [-3, -8] });
+            document.getElementById('agent-spawn-hint').textContent = 'Custom spawn selected';
+            toggleAgentSpawnMode();
+        }
+
+        function clearAgentSpawn() {
+            _agentSpawnPt = null;
+            if (_agentSpawnMarker) { map.removeLayer(_agentSpawnMarker); _agentSpawnMarker = null; }
+            document.getElementById('agent-spawn-hint').textContent = 'No manual spawn (centre/random)';
+        }
 
         window.openStats = function () { window.open('stats.html', '_blank'); };
         window.openMission = function () { window.open('mission.html', '_blank'); };
