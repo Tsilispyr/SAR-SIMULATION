@@ -7,10 +7,12 @@ from pydantic import BaseModel
 import osmnx as ox
 import networkx as nx
 from pyproj import Transformer
+from shapely.geometry import Point, Polygon as ShapelyPolygon, LineString
 import asyncio
 import threading
 import traceback
 import logging
+import pandas as pd
 import random
 import math
 import json
@@ -62,7 +64,54 @@ class RobotPosition(BaseModel):
 class VectorPathRequest(BaseModel):
     start_x: float; start_y: float; end_x: float; end_y: float
 
-# --- 4. GAME LOGIC CLASSES ---
+class GeoPoint(BaseModel):
+    lat: float
+    lon: float
+
+class GeofencePolygon(BaseModel):
+    points: list[GeoPoint]  # >= 3 points
+
+class WaypointItem(BaseModel):
+    id: int
+    lat: float
+    lon: float
+    label: str = ""
+
+class WaypointList(BaseModel):
+    waypoints: list[WaypointItem]
+    loop: bool = False
+
+# --- 4. GAME LOGIC CLASSES & HELPERS ---
+
+def line_of_sight(p1: tuple[float, float], p2: tuple[float, float]) -> bool:
+    """
+    Returns True if the line between p1 and p2 (in UTM projected coords)
+    does not intersect any building in the provided STRtree.
+    """
+    bldg_tree = current_map_data.get("bldg_tree")
+    if not bldg_tree:
+        return True
+    
+    ray = LineString([p1, p2])
+    # query returns indices of possibly intersecting geometries in 2.0, or geometries in 1.x
+    potential_matches = bldg_tree.query(ray)
+    try:
+        if len(potential_matches) == 0:
+            return True
+    except TypeError:
+        # Shapely 1.x might return a generator or non-len object sometimes? No, it returns a list.
+        pass
+        
+    for item in potential_matches:
+        # If it's an integer index (Shapely >= 2.0)
+        if isinstance(item, (int, np.integer)):
+            geom = bldg_tree.geometries.take(item) if hasattr(bldg_tree, 'geometries') else current_map_data["buildings_proj"][item]["geometry"]
+        else:
+            geom = item
+        if geom.intersects(ray):
+            return False
+            
+    return True
 
 class Enemy:
     def __init__(self, _id, enemy_type, start_node, G, cx, cy,
@@ -83,6 +132,9 @@ class Enemy:
         n = G.nodes[start_node]
         self.x = round(n['x'] - cx, 2)
         self.y = round(n['y'] - cy, 2)
+        # Direction & collision
+        self.heading       = 0.0   # math degrees: 0=East, 90=North
+        self.hitbox_radius = 0.8   # metres
 
     def calculate_path_coords(self, path_nodes):
         coords = []
@@ -167,13 +219,92 @@ class Enemy:
                 self.x, self.y = target['x'], target['y']
                 self.current_path.pop(0)
                 move_dist_remaining -= dist_to_target
+                # update heading on node arrival
+                self.heading = math.degrees(math.atan2(
+                    target['y'] - self.y + (target['y'] - self.y),
+                    target['x'] - self.x + (target['x'] - self.x)))
             else:
                 dir_x = (target['x'] - self.x) / dist_to_target
                 dir_y = (target['y'] - self.y) / dist_to_target
                 self.x += dir_x * move_dist_remaining
                 self.y += dir_y * move_dist_remaining
+                self.heading = math.degrees(math.atan2(dir_y, dir_x))
                 move_dist_remaining = 0
 
+
+# ---------------------------------------------------------------------------
+#  SENSORS (Phase 4)
+# ---------------------------------------------------------------------------
+class SensorDetection(BaseModel):
+    type: str
+    obj_id: int
+    dist_m: float
+    angle_deg: float
+
+class CameraSensor:
+    def __init__(self, fov_deg=90.0, range_m=50.0):
+        self.fov_deg = fov_deg
+        self.range_m = range_m
+
+    def scan(self, agent_x, agent_y, agent_heading, entities) -> list[SensorDetection]:
+        detections = []
+        for e in entities:
+            if not e.active if hasattr(e, 'active') else False:
+                continue
+            dx = e.x - agent_x
+            dy = e.y - agent_y
+            dist = math.hypot(dx, dy)
+            if dist > self.range_m: continue
+            
+            angle_to_e = math.degrees(math.atan2(dy, dx))
+            rel_angle = (angle_to_e - agent_heading)
+            rel_angle = (rel_angle + 180) % 360 - 180
+            
+            if abs(rel_angle) <= self.fov_deg / 2.0:
+                if line_of_sight((agent_x, agent_y), (e.x, e.y)):
+                    detections.append(SensorDetection(
+                        type=e.type, obj_id=e.id, dist_m=round(dist,1),
+                        # Negate: math CCW = camera-left; we want +right convention
+                        angle_deg=round(-rel_angle, 1)
+                    ))
+        return detections
+
+class LiDARSensor:
+    def __init__(self, max_range_m=30.0):
+        self.max_range_m = max_range_m
+    
+    def scan(self, agent_x, agent_y, agent_heading) -> list[float]:
+        import numbers
+        ranges = []
+        bldg_tree = current_map_data.get("bldg_tree")
+        if not bldg_tree:
+            return [self.max_range_m] * 36
+            
+        for i in range(36):
+            angle = math.radians(agent_heading + i * 10)
+            ex = agent_x + math.cos(angle) * self.max_range_m
+            ey = agent_y + math.sin(angle) * self.max_range_m
+            ray = LineString([(agent_x, agent_y), (ex, ey)])
+            
+            potential = bldg_tree.query(ray)
+            hit_dist = self.max_range_m
+            try:
+                if len(potential) == 0:
+                    ranges.append(hit_dist); continue
+            except TypeError: pass
+            
+            for item in potential:
+                import numpy as np
+                if isinstance(item, (int, np.integer, numbers.Integral)):
+                    geom = bldg_tree.geometries.take(item) if hasattr(bldg_tree, 'geometries') else current_map_data["buildings_proj"][item]["geometry"]
+                else:
+                    geom = item
+                if geom.intersects(ray):
+                    inter = geom.intersection(ray)
+                    d = Point(agent_x, agent_y).distance(inter)
+                    if d < hit_dist: hit_dist = float(d)
+            ranges.append(round(hit_dist, 1))
+        return ranges
 
 # ---------------------------------------------------------------------------
 #  PER-AGENT STATE
@@ -202,9 +333,20 @@ class AgentState:
         self.terrain_penalty = 0
         self.targets_collected = 0
         self.dead_ends       = set()
-        self.active          = True   # False when incapacitated by contact
-        self.assigned_target_id = None  # greedy pre-assignment hint
+        self.active          = True
+        self.assigned_target_id = None
+        
+        # Phase 4 Sensors
+        self.heading         = 0.0  # math degrees (0=East, 90=North)
+        self.hitbox_radius   = 0.8  # metres - physical footprint of the robot
+        self.camera          = CameraSensor()
+        self.lidar           = LiDARSensor()
+        self.current_detections = []
+        self.lidar_scan      = []
 
+    def update_sensors(self, enemies):
+        self.current_detections = self.camera.scan(self.robot_x, self.robot_y, self.heading, enemies)
+        self.lidar_scan = self.lidar.scan(self.robot_x, self.robot_y, self.heading)
 
 # ---------------------------------------------------------------------------
 #  TERRAIN COST CONFIG (mirrors SARGV-FIN-CC.py TILE_TYPE_DIFFICULT/HAZARD)
@@ -256,13 +398,18 @@ HIGHWAY_MULTIPLIER = {
 
 
 def build_penalized_graph(G, enemies, cx=0.0, cy=0.0):
-    """Return a copy of G with tiered enemy risk penalties applied to edge lengths.
-    cx, cy: map centre in projected coords. Enemy positions are centred-relative,
-    so we add cx/cy to convert them to absolute projected coords for distance checks.
-    """
+    """Return a copy of G with tiered enemy risk penalties and geofence penalties applied."""
     U = G.to_undirected() if G.is_directed() else G.copy()
+    geofence = game_logic.geofence_poly if 'game_logic' in dir() else None
+    for u, v, k, data in U.edges(keys=True, data=True):
+        ux, uy = U.nodes[u]['x'], U.nodes[u]['y']
+        vx, vy = U.nodes[v]['x'], U.nodes[v]['y']
+        # Geofence: massive penalty if edge endpoints are outside polygon (projected)
+        if geofence is not None:
+            mid_x, mid_y = (ux + vx) / 2.0, (uy + vy) / 2.0
+            if not geofence.contains(Point(mid_x, mid_y)):
+                data['length'] = data.get('length', 1.0) + 6000.0
     for enemy in enemies:
-        # Enemy stores centred coords; add cx/cy for projected comparison with node coords
         ex, ey     = enemy.x + cx, enemy.y + cy
         radius     = enemy.detection_radius
         ext_radius = radius + 30.0
@@ -353,6 +500,13 @@ class SARGameState:
         self.sim_paused           = False
         self.robot_speed_ms       = 6.0
         self._spawn_snapshot      = None
+        # Geofencing
+        self.geofence_poly: ShapelyPolygon | None = None
+        self.geofence_pts: list = []   # raw [{lat,lon}] for API response
+        # Waypoint mode
+        self.waypoint_mode: bool  = False
+        self.waypoint_loop: bool  = False
+        self._waypoint_index: int = 0  # which waypoint agents are heading to
 
     # ------------------------------------------------------------------
     @property
@@ -374,7 +528,7 @@ class SARGameState:
     def spawn_objects(self, G, cx, cy, n_patrol=3, n_aggressive=2, n_targets=5,
                       patrol_speed=2.5, aggr_speed=4.5, n_agents=1,
                       agent_speed=6.0, detection_radius=50.0,
-                      custom_placements=None):
+                      custom_placements=None, agent_lat=None, agent_lon=None):
         """Spawn all entities. custom_placements overrides random when mode=custom."""
         self.enemies.clear()
         self.targets.clear()
@@ -444,11 +598,42 @@ class SARGameState:
                     self.enemies.append(Enemy(idx, 'aggressive', enemy_nodes[idx], G, cx, cy,
                                               patrol_speed, aggr_speed, detection_radius))
                 remaining = [n for n in available if n not in enemy_nodes]
-                agent_starts = random.sample(remaining, min(n_agents, len(remaining)))
+                
+                agent_starts = []
+                if agent_lat is not None and agent_lon is not None:
+                    try:
+                        inv_tf = Transformer.from_crs("epsg:4326", G.graph['crs'], always_xy=True)
+                        px, py = inv_tf.transform(agent_lon, agent_lat)
+                        anode = ox.distance.nearest_nodes(G, px, py)
+                        agent_starts.append(anode)
+                    except:
+                        pass
+                
+                needed = n_agents - len(agent_starts)
+                if needed > 0:
+                    cand = [n for n in remaining if n not in agent_starts]
+                    agent_starts.extend(random.sample(cand, min(needed, len(cand))))
+                
                 while len(agent_starts) < n_agents:
                     agent_starts.append(random.choice(all_nodes))
             else:
-                agent_starts = random.sample(all_nodes, min(n_agents, len(all_nodes)))
+                agent_starts = []
+                if agent_lat is not None and agent_lon is not None:
+                    try:
+                        inv_tf = Transformer.from_crs("epsg:4326", G.graph['crs'], always_xy=True)
+                        px, py = inv_tf.transform(agent_lon, agent_lat)
+                        anode = ox.distance.nearest_nodes(G, px, py)
+                        agent_starts.append(anode)
+                    except:
+                        pass
+                
+                needed = n_agents - len(agent_starts)
+                if needed > 0:
+                    cand = [n for n in all_nodes if n not in agent_starts]
+                    agent_starts.extend(random.sample(cand, min(needed, len(cand))))
+                
+                while len(agent_starts) < n_agents:
+                    agent_starts.append(random.choice(all_nodes))
 
             for aid in range(n_agents):
                 ag = AgentState(aid, agent_starts[aid], G, cx, cy, agent_speed)
@@ -501,7 +686,31 @@ class SARGameState:
         """Move agent along its path at agent.robot_speed_ms m/s."""
         if not ag.robot_auto_path:
             return
-        dist_to_move = ag.robot_speed_ms * delta_t
+
+        # ── Corner / obstacle slowdown (LiDAR front-arc) ──────────────────
+        corner_slowing = 1.0
+        if ag.lidar_scan and len(ag.lidar_scan) == 36:
+            fwd_range = min(ag.lidar_scan[0], ag.lidar_scan[1], ag.lidar_scan[35])
+            if fwd_range < 10.0:
+                corner_slowing = max(0.3, fwd_range / 10.0)   # graduated slow-down
+                if not ag.escape_mode and not ag.last_decision.startswith("CORNER"):
+                    ag.last_decision = "CORNER PEEK"
+
+        # ── Hitbox: check next waypoint for enemy proximity ───────────────
+        if ag.robot_auto_path:
+            wp = ag.robot_auto_path[0]
+            for e in self.enemies:
+                d_to_wp = math.hypot(wp['x'] - e.x, wp['y'] - e.y)
+                clearance = ag.hitbox_radius + e.hitbox_radius + 0.4  # tiny buffer
+                if d_to_wp < clearance:
+                    # Next waypoint is inside an enemy's hitbox → replan immediately
+                    ag.robot_auto_path.clear()
+                    ag.replan_timer = self.REPLAN_INTERVAL   # force replan next tick
+                    ag.last_decision = f"BLOCKED: hitbox conflict, replanning"
+                    return
+
+        dist_to_move = ag.robot_speed_ms * corner_slowing * delta_t
+
         while ag.robot_auto_path and dist_to_move > 0:
             wp = ag.robot_auto_path[0]
             dx = wp['x'] - ag.robot_x
@@ -514,20 +723,25 @@ class SARGameState:
                 ag.robot_x, ag.robot_y = wp['x'], wp['y']
                 ag.robot_auto_path.pop(0)
                 dist_to_move -= d
+                if d > 0:
+                    ag.heading = math.degrees(math.atan2(dy, dx))
             else:
                 ag.robot_x += (dx / d) * dist_to_move
                 ag.robot_y += (dy / d) * dist_to_move
+                ag.heading  = math.degrees(math.atan2(dy, dx))
                 dist_to_move = 0
 
     # ------------------------------------------------------------------
     # ESCAPE PATH (per-agent)
     # ------------------------------------------------------------------
     def find_escape_path(self, G, ag: AgentState, penalized_G, cx, cy):
-        threatening = [e for e in self.enemies
-                       if e.base_type == 'aggressive' and e.type == 'aggressive']
+        visible_enemy_ids = {d.obj_id for d in ag.current_detections if d.type == 'aggressive'}
+        threatening = [e for e in self.enemies if e.id in visible_enemy_ids and e.type == 'aggressive']
         if not threatening:
             return []
         robot_node = ag.robot_node
+
+        # 1. Multi-hop BFS search
         candidates = set()
         frontier = {robot_node}; visited = {robot_node}
         for hop in range(8):
@@ -541,21 +755,31 @@ class SARGameState:
             frontier = nxt
             if not frontier:
                 break
-        if not candidates:
-            return []
+
         best_score, best_node = -999999.0, None
-        for cand in candidates:
-            cx_n, cy_n = G.nodes[cand]['x'], G.nodes[cand]['y']
-            enemy_turns = min(
-                math.hypot((cx_n - cx) - e.x, (cy_n - cy) - e.y) / max(e.speed, 0.1)
-                for e in threatening)
-            try:
-                path_len = nx.shortest_path_length(penalized_G, robot_node, cand, weight='length')
-            except:
-                continue
-            sc = enemy_turns - path_len / 4.0
-            if sc > best_score:
-                best_score = sc; best_node = cand
+        if candidates:
+            for cand in candidates:
+                cx_n, cy_n = G.nodes[cand]['x'], G.nodes[cand]['y']
+                enemy_turns = min(
+                    math.hypot((cx_n - cx) - e.x, (cy_n - cy) - e.y) / max(e.speed, 0.1)
+                    for e in threatening)
+                try:
+                    path_len = nx.shortest_path_length(penalized_G, robot_node, cand, weight='length')
+                except: continue
+                sc = enemy_turns - path_len / 4.0
+                if sc > best_score:
+                    best_score = sc; best_node = cand
+
+        # 2. Greedy 1-hop fallback (maximizes distance from closest threat)
+        if best_node is None:
+            max_dist = -1
+            closest_threat = min(threatening, key=lambda e: math.hypot((G.nodes[robot_node]['x'] - cx) - e.x, (G.nodes[robot_node]['y'] - cy) - e.y))
+            for nb in G.neighbors(robot_node):
+                nb_x, nb_y = G.nodes[nb]['x'] - cx, G.nodes[nb]['y'] - cy
+                dist = math.hypot(nb_x - closest_threat.x, nb_y - closest_threat.y)
+                if dist > max_dist:
+                    max_dist = dist; best_node = nb
+
         if best_node is None:
             return []
         try:
@@ -568,8 +792,10 @@ class SARGameState:
     # BRAVE PATH (per-agent)
     # ------------------------------------------------------------------
     def find_brave_path(self, G, ag: AgentState, target, cx, cy):
-        threatening = [e for e in self.enemies
-                       if e.base_type == 'aggressive' and e.type == 'aggressive']
+        # Only evade aggressive enemies that the agent currently sees via sensors
+        visible_enemy_ids = {d.obj_id for d in ag.current_detections if d.type == 'aggressive'}
+        threatening = [e for e in self.enemies if e.id in visible_enemy_ids and e.type == 'aggressive']
+        
         target_node = target['node']
         robot_node  = ag.robot_node
         try:
@@ -607,14 +833,22 @@ class SARGameState:
         if not self.targets:
             return
 
-        penalized_G = build_penalized_graph(G, self.enemies, cx, cy)
-        threatening  = [e for e in self.enemies
-                        if e.base_type == 'aggressive' and e.type == 'aggressive']
-        if threatening:
-            nearest_dist = min(
-                math.hypot(e.x - ag.robot_x, e.y - ag.robot_y) for e in threatening)
+        # 1. Evaluate space and maneuverability based ONLY on active sensor detections
+        visible_enemy_ids = {d.obj_id for d in ag.current_detections if d.type in ['aggressive', 'patrol']}
+        known_enemies = [e for e in self.enemies if e.id in visible_enemy_ids]
+        
+        penalized_G = build_penalized_graph(G, known_enemies, cx, cy)
+        threatening  = [e for e in known_enemies if e.base_type == 'aggressive' and e.type == 'aggressive']
+        blocking     = [e for e in known_enemies if e.base_type == 'patrol']
+        
+        if threatening or blocking:
+            nearest_dist = min((d.dist_m for d in ag.current_detections if d.obj_id in {e.id for e in known_enemies}), default=999)
             det_r = self.enemies[0].detection_radius if self.enemies else 50.0
-            if nearest_dist < 1.2 * det_r:
+            
+            # Evasion distance: longer for aggressive, closer for patrol evaluation
+            evade_threshold = (1.5 * det_r) if threatening else (0.8 * det_r)
+            
+            if nearest_dist < evade_threshold:
                 best_t = self._pick_best_target(penalized_G, ag)
                 if best_t:
                     brave = self.find_brave_path(penalized_G, ag, best_t, cx, cy)
@@ -622,8 +856,10 @@ class SARGameState:
                         ag.robot_auto_path   = brave
                         ag.escape_mode       = False
                         ag.current_target_id = best_t['id']
-                        ag.last_decision     = (f"BRAVE: T{best_t['id']} ({nearest_dist:.0f}m threat)")
+                        ag.last_decision     = (f"MANEUVER: T{best_t['id']} ({nearest_dist:.0f}m threat)")
                         return
+                
+                # If maneuver fails, fully escape (more critical for aggressive)
                 esc = self.find_escape_path(G, ag, penalized_G, cx, cy)
                 if esc:
                     ag.robot_auto_path   = esc
@@ -649,7 +885,11 @@ class SARGameState:
             print(f"{C.ERR}[A{ag.id}] replan failed: {e}{C.END}")
 
     def _pick_best_target(self, penalized_G, ag: AgentState):
-        """Pick lowest-cost target; prefer assigned target to avoid collision with other agents."""
+        """Pick lowest-cost target; prefer assigned target; in waypoint_mode follow index order."""
+        if self.waypoint_mode and self.targets:
+            # Sequential: targets are ordered waypoints; pick the one at _waypoint_index
+            idx = min(self._waypoint_index, len(self.targets) - 1)
+            return self.targets[idx]
         best_t, best_cost = None, float('inf')
         for t in self.targets:
             try:
@@ -680,6 +920,9 @@ class SARGameState:
             if not ag.active:
                 continue
 
+            # Update sensors (Camera + LiDAR)
+            ag.update_sensors(self.enemies)
+
             # Terrain penalty
             if ag._last_robot_node is not None and ag.robot_node != ag._last_robot_node:
                 edge_data = G.get_edge_data(ag._last_robot_node, ag.robot_node)
@@ -703,6 +946,11 @@ class SARGameState:
                     if ag.current_target_id == t['id']:
                         ag.current_target_id  = None
                         ag.robot_auto_path    = []
+                    # In waypoint mode: advance the waypoint index
+                    if self.waypoint_mode:
+                        self._waypoint_index += 1
+                        if self.waypoint_loop and self._waypoint_index >= self.targets_total:
+                            self._waypoint_index = 0
                     # Reset assigned hint for ALL agents to force re-assignment
                     for other in self.agents:
                         if other.assigned_target_id == t['id']:
@@ -974,11 +1222,14 @@ def get_robot_position():
             "color":      ag.color,
             "lat":        ag_st.get("lat"),
             "lon":        ag_st.get("lon"),
+            "heading":    ag.heading,
             "auto_path":  path_ll,
             "score":      ag.score,
             "escape_mode": ag.escape_mode,
             "active":     ag.active,
             "last_decision": ag.last_decision,
+            "camera":     [d.model_dump() for d in ag.current_detections],
+            "lidar":      ag.lidar_scan,
         })
 
     # Backward compat: primary robot = agent 0
@@ -1003,16 +1254,37 @@ def fetch_vector_map(lat: float = 38.900, lon: float = 22.433, radius: int = 150
                      n_patrol: int = 3, n_aggr: int = 2, n_targets: int = 5,
                      patrol_speed: float = 2.5, aggr_speed: float = 4.5,
                      agent_speed: float = 6.0, n_agents: int = 1,
-                     detection_radius: float = 50.0, mode: str = 'random'):
+                     detection_radius: float = 50.0, mode: str = 'random',
+                     agent_lat: float = None, agent_lon: float = None):
     try:
         print(f"\n{C.OSM}[OSM] Map Request: lat={lat}, lon={lon}, radius={radius}, "
               f"agents={n_agents}, mode={mode}{C.END}")
 
-        G_directed = ox.graph_from_point((lat, lon), dist=radius, network_type='all')
+        if game_logic.geofence_pts and len(game_logic.geofence_pts) >= 3:
+            pts = [(p['lon'], p['lat']) for p in game_logic.geofence_pts]
+            if pts[0] != pts[-1]:
+                pts.append(pts[0])
+            poly = ShapelyPolygon(pts)
+            # Use geofence bounding box to download graph
+            G_directed = ox.graph_from_polygon(poly, network_type='all')
+            print(f"{C.OSM}[OSM] Using Geofence Polygon for map download{C.END}")
+        else:
+            G_directed = ox.graph_from_point((lat, lon), dist=radius, network_type='all')
+            print(f"{C.OSM}[OSM] Using Point+Radius for map download{C.END}")
+
         G          = G_directed.to_undirected()
         largest_cc = max(nx.connected_components(G), key=len)
         G          = G.subgraph(largest_cc).copy()
         G_proj     = ox.project_graph(G)
+
+        # Apply geofence clip: remove nodes outside the polygon (optional)
+        if game_logic.geofence_poly is not None and len(game_logic.geofence_pts) >= 3:
+            # Project geofence points to UTM
+            if 'crs' in G_proj.graph:
+                inv_tf = Transformer.from_crs("epsg:4326", G_proj.graph['crs'], always_xy=True)
+                geofence_proj_pts = [inv_tf.transform(p['lon'], p['lat'])
+                                     for p in game_logic.geofence_pts]
+                game_logic.geofence_poly = ShapelyPolygon(geofence_proj_pts)
 
         for u, v, k, data in G_proj.edges(keys=True, data=True):
             hw   = data.get('highway', '')
@@ -1050,6 +1322,68 @@ def fetch_vector_map(lat: float = 38.900, lon: float = 22.433, radius: int = 150
             "center_lon":  lon,
             "radius":      radius,
         })
+        
+        # --- Extract 3D Buildings ---
+        try:
+            print(f"{C.OSM}[OSM] Fetching 3D building footprints...{C.END}")
+            if game_logic.geofence_pts and len(game_logic.geofence_pts) >= 3:
+                func = getattr(ox, 'features_from_polygon', getattr(ox, 'geometries_from_polygon', None))
+                bldg_gdf = func(poly, tags={"building": True}) if func else None
+            else:
+                func = getattr(ox, 'features_from_point', getattr(ox, 'geometries_from_point', None))
+                bldg_gdf = func((lat, lon), dist=radius, tags={"building": True}) if func else None
+
+            buildings_wgs = []
+            buildings_proj = []
+
+            if bldg_gdf is not None and not bldg_gdf.empty:
+                bldg_gdf = bldg_gdf[bldg_gdf.geometry.type.isin(['Polygon', 'MultiPolygon'])]
+                bldg_gdf_proj = bldg_gdf.to_crs(G_proj.graph['crs']) if 'crs' in G_proj.graph else ox.project_gdf(bldg_gdf)
+
+                for idx, row in bldg_gdf.iterrows():
+                    geom_wgs = row['geometry']
+                    height = 6.0
+                    if 'height' in row and pd.notna(row['height']):
+                        try: height = float(str(row['height']).replace('m', '').replace(',', '.').strip())
+                        except: pass
+                    elif 'building:levels' in row and pd.notna(row['building:levels']):
+                        try: height = float(str(row['building:levels']).split(',')[0].strip()) * 3.0
+                        except: pass
+
+                    coords = []
+                    geom_type = geom_wgs.geom_type
+                    if geom_type == 'Polygon':
+                        coords = [list(geom_wgs.exterior.coords)]
+                    elif geom_type == 'MultiPolygon':
+                        coords = [list(g.exterior.coords) for g in geom_wgs.geoms]
+                    
+                    if coords:
+                        buildings_wgs.append({"id": str(idx), "geometry": coords, "type": geom_type, "height_m": height})
+
+                    geom_proj = bldg_gdf_proj.loc[idx, 'geometry']
+                    if geom_proj.geom_type == 'Polygon':
+                        shifted = ShapelyPolygon([(x - center_x, y - center_y) for x, y in geom_proj.exterior.coords])
+                        buildings_proj.append({"geometry": shifted, "height_m": height})
+                    elif geom_proj.geom_type == 'MultiPolygon':
+                        for g in geom_proj.geoms:
+                            shifted = ShapelyPolygon([(x - center_x, y - center_y) for x, y in g.exterior.coords])
+                            buildings_proj.append({"geometry": shifted, "height_m": height})
+                            
+            current_map_data["buildings_wgs"] = buildings_wgs
+            current_map_data["buildings_proj"] = buildings_proj
+            
+            # Build STRtree for fast Line-of-Sight raycasting
+            from shapely.strtree import STRtree
+            geoms = [b["geometry"] for b in buildings_proj]
+            current_map_data["bldg_tree"] = STRtree(geoms) if geoms else None
+            
+            print(f"{C.OSM}[OSM] Loaded {len(buildings_proj)} building footprints (indexed in STRtree).{C.END}")
+        except Exception as e:
+            print(f"{C.ERR}[Error] Failed to fetch buildings: {e}{C.END}")
+            current_map_data["buildings_wgs"] = []
+            current_map_data["buildings_proj"] = []
+            current_map_data["bldg_tree"] = None
+
         robot_state["agents"] = {}
 
         # Custom placements need projected coords
@@ -1066,7 +1400,7 @@ def fetch_vector_map(lat: float = 38.900, lon: float = 22.433, radius: int = 150
             G_proj, center_x, center_y,
             n_patrol, n_aggr, n_targets,
             patrol_speed, aggr_speed, n_agents, agent_speed,
-            detection_radius, placements)
+            detection_radius, placements, agent_lat, agent_lon)
 
         roads_data = []
         for u, v, data in G_proj.edges(data=True):
@@ -1583,3 +1917,130 @@ def get_map_info():
         "game_over":       game_logic.game_over,
     }
 
+
+# ---------------------------------------------------------------------------
+# GEOFENCING ENDPOINTS
+# ---------------------------------------------------------------------------
+
+@app.post("/api/sim/geofence")
+def set_geofence(req: GeofencePolygon):
+    """Set a polygon geofence. The polygon (in WGS-84 lat/lon) is stored raw;
+    it is projected to UTM when the next map load happens so Shapely can enforce it."""
+    if len(req.points) < 3:
+        raise HTTPException(400, "Geofence polygon needs at least 3 points")
+    game_logic.geofence_pts = [{"lat": p.lat, "lon": p.lon} for p in req.points]
+    # If a map is already loaded, project immediately
+    G_proj = current_map_data.get("G_proj")
+    if G_proj is not None and 'crs' in G_proj.graph:
+        inv_tf = Transformer.from_crs("epsg:4326", G_proj.graph['crs'], always_xy=True)
+        proj_pts = [inv_tf.transform(p["lon"], p["lat"]) for p in game_logic.geofence_pts]
+        game_logic.geofence_poly = ShapelyPolygon(proj_pts)
+    else:
+        game_logic.geofence_poly = None  # will be projected on next map load
+    print(f"{C.OK}[GEOFENCE] Set with {len(req.points)} points{C.END}")
+    return {"status": "set", "n_points": len(req.points)}
+
+
+@app.delete("/api/sim/geofence")
+def clear_geofence():
+    """Remove the geofence polygon — agents are free to move anywhere."""
+    game_logic.geofence_poly = None
+    game_logic.geofence_pts  = []
+    print(f"{C.WARN}[GEOFENCE] Cleared{C.END}")
+    return {"status": "cleared"}
+
+
+@app.get("/api/sim/geofence")
+def get_geofence():
+    """Return the current geofence polygon as a GeoJSON Feature."""
+    if not game_logic.geofence_pts:
+        return {"geofence": None}
+    coords = [[p["lon"], p["lat"]] for p in game_logic.geofence_pts]
+    coords.append(coords[0])  # close ring
+    return {
+        "geofence": {
+            "type": "Feature",
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [coords]
+            },
+            "properties": {"n_points": len(game_logic.geofence_pts)}
+        }
+    }
+
+
+# ---------------------------------------------------------------------------
+# WAYPOINT MISSION ENDPOINTS
+# ---------------------------------------------------------------------------
+
+@app.post("/api/mission/waypoints")
+def set_waypoints(req: WaypointList):
+    """Set waypoints for a waypoint-mode mission.
+    Waypoints are converted to targets in indexed order.
+    Call before /api/map/vector with mode=waypoint, or after to override targets."""
+    G_proj = current_map_data.get("G_proj")
+    if G_proj is None:
+        raise HTTPException(400, "Load a map first (/api/map/vector)")
+    cx = current_map_data["center_x"]
+    cy = current_map_data["center_y"]
+    inv_tf = Transformer.from_crs("epsg:4326", G_proj.graph['crs'], always_xy=True)
+    game_logic.waypoint_mode  = True
+    game_logic.waypoint_loop  = req.loop
+    game_logic._waypoint_index = 0
+    # Replace targets with ordered waypoints
+    game_logic.targets.clear()
+    for i, wp in enumerate(req.waypoints):
+        px, py = inv_tf.transform(wp.lon, wp.lat)
+        node   = ox.distance.nearest_nodes(G_proj, px, py)
+        nn     = G_proj.nodes[node]
+        game_logic.targets.append({
+            'id':    i,
+            'x':     round(nn['x'] - cx, 2),
+            'y':     round(nn['y'] - cy, 2),
+            'node':  node,
+            'label': wp.label or f"WP{i+1}",
+        })
+    game_logic.targets_total = len(game_logic.targets)
+    # Re-assign targets sequentially (index-based in waypoint mode)
+    game_logic._assign_targets_to_agents(G_proj)
+    print(f"{C.OK}[WAYPOINTS] Set {len(req.waypoints)} waypoints (loop={req.loop}){C.END}")
+    return {"status": "set", "n_waypoints": len(req.waypoints), "loop": req.loop}
+
+
+@app.delete("/api/mission/waypoints")
+def clear_waypoints():
+    """Disable waypoint mode, return to normal greedy target mode."""
+    game_logic.waypoint_mode   = False
+    game_logic.waypoint_loop   = False
+    game_logic._waypoint_index = 0
+    return {"status": "cleared"}
+
+
+
+
+
+
+
+
+
+# [OSM] Map Request: lat=37.99501871158593, lon=23.793452382087708, radius=200, agents=1, mode=random
+
+# backend-1   | Traceback (most recent call last):
+
+# backend-1   |   File "/app/src/main.py", line 1269, in fetch_vector_map
+
+# backend-1   |     G_directed = ox.graph_from_polygon(poly, network_type='all')
+
+# backend-1   |   File "/usr/local/lib/python3.10/site-packages/osmnx/graph.py", line 475, in graph_from_polygon
+
+# backend-1   |     raise ValueError(msg)
+
+# backend-1   | ValueError: The geometry of `polygon` is invalid.
+
+# backend-1   |
+
+# backend-1   | INFO:     172.18.0.1:60120 - "GET /api/map/vector?lat=37.99501871158593&lon=23.793452382087708&radius=200&n_patrol=3&n_aggr=2&n_targets=5&patrol_speed=2.5&aggr_speed=4.5&agent_speed=6&n_agents=1&detection_radius=50&mode=random&agent_lat=37.99501871158593&agent_lon=23.793452382087708 HTTP/1.1" 400 Bad Request
+
+
+# also when radius is selected or polygon, then the state of selection is cleared and the one we selected is used, not overlayed
+# the polygon to close should have a better way instead of double click and we should be able to fine tune and add points before or after already placed ones
