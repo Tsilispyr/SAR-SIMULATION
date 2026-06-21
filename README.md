@@ -2,6 +2,8 @@
 
 A fully browser-controllable **Search and Rescue Unmanned Ground Vehicle** simulation running on real OpenStreetMap street networks. Deploy agents to any city on Earth, watch them navigate in real time, evade enemies, collect targets, and review per-agent analytics - all from a browser, no installation required beyond Docker.
 
+![whole-top-view-mission-view](screenshots/whole-top-view-mission-view.png)
+
 ---
 
 ## What This Is
@@ -136,6 +138,9 @@ Speed is controlled by `sim_speed_multiplier` (`/api/sim/speed`). At 100× the e
 ### 6. Frontend Pages
 
 #### `index.html` - Mission Planner
+
+![main-page-mission-control-also-random-mission-creation](screenshots/main-page-mission-control-also-random-mission-creation.png)
+
 - Click the map or enter coordinates to select the mission centre
 - Draw the mission radius interactively on the map
 - Configure: radius, number of targets, patrol / aggressive enemy counts and speeds, number of agents, detection radius
@@ -144,6 +149,11 @@ Speed is controlled by `sim_speed_multiplier` (`/api/sim/speed`). At 100× the e
 - When a scenario is loaded, deploy automatically uses `mode=custom` - the custom editor placements are used instead of random spawning
 
 #### `mission.html` - Live Mission Monitor
+
+![ongoing-mission-view](screenshots/ongoing-mission-view.png)
+
+![dashboard-with-target-identified](screenshots/dashboard-with-target-identified.png)
+
 - Full-screen Leaflet map centred on the mission area
 - **Per-agent coloured markers** (blue / green / orange / pink) with glow effect
 - **Per-agent dashed path polylines** matching agent colour
@@ -155,6 +165,9 @@ Speed is controlled by `sim_speed_multiplier` (`/api/sim/speed`). At 100× the e
 - **End banner** - colour-coded SUCCESS / PARTIAL / FAILED overlay with final score
 
 #### `stats.html` - Analytics Dashboard
+
+![realtime-mission-stats](screenshots/realtime-mission-stats.png)
+
 - KPI strip - real-time score, targets remaining, escape mode, mission status
 - **Per-agent score charts** - one Chart.js line chart per agent, dynamically created as agents are detected, always updating in real time
 - **Targets remaining over time** chart
@@ -165,6 +178,9 @@ Speed is controlled by `sim_speed_multiplier` (`/api/sim/speed`). At 100× the e
 - **Score Formula panel** - collapsible explanation of how points are calculated
 
 #### `editor.html` - Scenario Editor
+
+![custom-mission-creator](screenshots/custom-mission-creator.png)
+
 - Leaflet map with a tool palette: Agent / Target / Patrol / Aggressive / Clear
 - Click the map to place entities; the backend stores them in `editor_state`
 - Save to a named JSON file (`/api/scenario/save`)

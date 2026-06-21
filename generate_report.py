@@ -266,9 +266,9 @@ report = f"""# Αναφορά Αξιολόγησης Συστήματος SAR
 | Μέτρο | Τιμή |
 |---|---|
 | Σύνολο αποστολών (έγκυρες) | {summary.get('total', len(valid))} |
-| ✅ Επιτυχίες (SUCCESS) | {summary.get('success', len(success))} ({summary.get('success_rate', pct(len(success), len(valid)))}%) |
-| 🔶 Μερικές Επιτυχίες (PARTIAL) | {summary.get('partial', len(partial))} ({summary.get('partial_rate', pct(len(partial), len(valid)))}%) |
-| ❌ Αποτυχίες (FAILED) | {summary.get('failed', len(failed))} ({summary.get('failed_rate', pct(len(failed), len(valid)))}%) |
+| ✓ Επιτυχίες (SUCCESS) | {summary.get('success', len(success))} ({summary.get('success_rate', pct(len(success), len(valid)))}%) |
+| ~ Μερικές Επιτυχίες (PARTIAL) | {summary.get('partial', len(partial))} ({summary.get('partial_rate', pct(len(partial), len(valid)))}%) |
+| ✗ Αποτυχίες (FAILED) | {summary.get('failed', len(failed))} ({summary.get('failed_rate', pct(len(failed), len(valid)))}%) |
 | Μέση βαθμολογία | {summary.get('avg_score', avg([r['score'] for r in valid]))} pts |
 | Καλύτερη βαθμολογία | {summary.get('best_score', max([r['score'] for r in valid] or [0]))} pts |
 | Μέσος χρόνος εξομοίωσης | {summary.get('avg_sim_time_s', avg([r.get('sim_elapsed_s',0) for r in valid]))} sec (sim-time) |
