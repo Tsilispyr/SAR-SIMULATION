@@ -45,5 +45,4 @@ implementation_plan.md
 README-SAR.md
 HRF-Poster-Template(1).pptx
 
-# Batch test intermediate outputs
-batch_results.csv
+# Batch test intermediate outputs (evaluation/ folder is tracked)
