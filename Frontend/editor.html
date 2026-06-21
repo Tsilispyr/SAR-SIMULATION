@@ -9,79 +9,65 @@
         rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
     <style>
-        *,
-        *::before,
-        *::after {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
+        *,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0; }
 
         :root {
-            --bg: #0f1117;
-            --surface: rgba(22, 33, 50, .95);
-            --border: rgba(109, 133, 153, .6);
-            --accent: #b3ca30;
-            --green: #19a725;
-            --yellow: #d3bf0d;
-            --red: #b60909;
-            --purple: #801ddd;
-            --text: #cdd6f4;
-            --muted: #6c7086;
+            --bg: #1b1f24;
+            --surface: rgba(37, 42, 52, .98);
+            --border: rgba(55, 65, 80, .9);
+            --accent: #4d87c7;
+            --green: #4da55e;
+            --yellow: #c9a32e;
+            --red: #b84444;
+            --purple: #7a50c0;
+            --text: #c4cad6;
+            --muted: #7a8496;
         }
 
         body {
             background: var(--bg);
-            font-family: 'Share Tech Mono', monospace;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
             overflow: hidden;
             color: var(--text);
+            font-size: 13px;
         }
 
-        #map {
-            position: fixed;
-            inset: 0;
-            z-index: 1;
-        }
+        #map { position: fixed; inset: 0; z-index: 1; }
 
-        /* Sidebar */
         #sidebar {
-            position: fixed;
-            top: 0;
-            left: 0;
-            bottom: 0;
+            position: fixed; top: 0; left: 0; bottom: 0;
             width: 260px;
             background: var(--surface);
             border-right: 1px solid var(--border);
             z-index: 1000;
             display: flex;
             flex-direction: column;
-            gap: 0;
-            backdrop-filter: blur(10px);
             overflow-y: auto;
+            flex-shrink: 0;
         }
 
         #sidebar h1 {
             font-family: 'Orbitron', sans-serif;
-            font-size: 13px;
+            font-size: 11px;
             letter-spacing: 2px;
             color: var(--accent);
             text-transform: uppercase;
-            padding: 14px 14px 10px;
+            padding: 12px 14px 10px;
             border-bottom: 1px solid var(--border);
         }
 
         .section {
-            padding: 12px 14px;
+            padding: 10px 12px;
             border-bottom: 1px solid var(--border);
         }
 
         .section h2 {
-            font-family: 'Orbitron', sans-serif;
-            font-size: 9px;
-            letter-spacing: 1.5px;
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
             color: var(--muted);
             text-transform: uppercase;
-            margin-bottom: 8px;
+            margin-bottom: 7px;
         }
 
         .tool-btn {
@@ -89,55 +75,27 @@
             align-items: center;
             gap: 8px;
             width: 100%;
-            padding: 7px 10px;
-            border-radius: 7px;
-            border: 1px solid transparent;
-            background: rgba(255, 255, 255, .05);
+            padding: 6px 9px;
+            border-radius: 3px;
+            border: 1px solid var(--border);
+            background: rgba(255,255,255,.03);
             color: var(--muted);
             cursor: pointer;
-            font-family: 'Share Tech Mono', monospace;
-            font-size: 11px;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            font-size: 12px;
             text-align: left;
-            margin-bottom: 4px;
-            transition: .2s;
+            margin-bottom: 3px;
+            transition: .15s;
         }
 
-        .tool-btn:hover {
-            background: rgba(255, 255, 255, .1);
-            color: var(--text);
-        }
-
-        .tool-btn.active {
-            border-color: currentColor;
-            background: rgba(255, 255, 255, .12);
-        }
-
-        .tool-btn .dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            flex-shrink: 0;
-        }
-
-        .tool-btn.t-agent {
-            color: #3d78ff;
-        }
-
-        .tool-btn.t-target {
-            color: gold;
-        }
-
-        .tool-btn.t-patrol {
-            color: #a855f7;
-        }
-
-        .tool-btn.t-aggr {
-            color: #ef4444;
-        }
-
-        .tool-btn.t-erase {
-            color: var(--muted);
-        }
+        .tool-btn:hover { background: rgba(255,255,255,.08); color: var(--text); border-color: #505f72; }
+        .tool-btn.active { border-color: currentColor; background: rgba(255,255,255,.1); }
+        .tool-btn .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+        .tool-btn.t-agent  { color: #5b8fd8; }
+        .tool-btn.t-target { color: #c9a83c; }
+        .tool-btn.t-patrol { color: #8a60d0; }
+        .tool-btn.t-aggr   { color: #c05050; }
+        .tool-btn.t-erase  { color: var(--muted); }
 
         .count-grid {
             display: grid;
@@ -147,102 +105,109 @@
         }
 
         .count-item {
-            background: rgba(255, 255, 255, .06);
-            border-radius: 6px;
+            background: rgba(255,255,255,.04);
+            border: 1px solid var(--border);
+            border-radius: 3px;
             padding: 5px 8px;
-            font-size: 10px;
         }
 
         .count-item .label {
             color: var(--muted);
             font-size: 9px;
             text-transform: uppercase;
-            letter-spacing: 1px;
+            letter-spacing: 0.5px;
             margin-bottom: 2px;
         }
 
         .count-item .val {
             font-size: 16px;
-            font-weight: 900;
-            font-family: 'Orbitron', sans-serif;
+            font-weight: 700;
+            color: var(--text);
+            font-family: 'Share Tech Mono', monospace;
         }
 
         .sb-input {
             width: 100%;
-            padding: 6px 8px;
-            border-radius: 6px;
+            padding: 5px 8px;
+            border-radius: 3px;
             border: 1px solid var(--border);
-            background: rgba(0, 0, 0, .4);
+            background: rgba(0,0,0,.35);
             color: var(--text);
-            font-family: 'Share Tech Mono', monospace;
-            font-size: 11px;
-            margin-bottom: 6px;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            font-size: 12px;
+            margin-bottom: 5px;
         }
+
+        .sb-input:focus { outline: none; border-color: var(--accent); }
 
         .sb-btn {
             width: 100%;
-            padding: 8px;
-            border-radius: 7px;
-            border: 1px solid var(--border);
-            background: rgba(255, 255, 255, .07);
+            padding: 6px 10px;
+            border-radius: 3px;
+            border: 1px solid #4a5265;
+            background: linear-gradient(to bottom, #353c48, #2c3340);
             color: var(--text);
             cursor: pointer;
-            font-family: 'Orbitron', sans-serif;
-            font-size: 10px;
-            letter-spacing: 1px;
-            text-transform: uppercase;
-            margin-bottom: 5px;
-            transition: .2s;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            font-size: 12px;
+            text-align: center;
+            margin-bottom: 4px;
+            transition: .15s;
         }
 
-        .sb-btn:hover {
-            background: rgba(255, 255, 255, .14);
+        .sb-btn:hover { background: linear-gradient(to bottom, #3f4858, #353c4a); border-color: #5a6278; }
+
+        .sb-btn.green  { border-color: var(--green);  color: #6ac87c; }
+        .sb-btn.green:hover  { background: linear-gradient(to bottom, #2a4032, #203328); }
+        .sb-btn.red    { border-color: var(--red);    color: #d06060; }
+        .sb-btn.red:hover    { background: linear-gradient(to bottom, #3a2020, #2c1818); }
+        .sb-btn.accent { border-color: var(--accent); color: #6aabde; }
+        .sb-btn.accent:hover { background: linear-gradient(to bottom, #253045, #1c2838); }
+        .sb-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(77,135,199,.12); }
+        .sb-btn.active-geofence { border-color: var(--green); color: #6ac87c; background: rgba(77,165,94,.1); }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 4px;
+            background: #3d4550;
+            border-radius: 2px;
+            outline: none;
+            cursor: pointer;
+            margin-bottom: 6px;
         }
 
-        .sb-btn.green {
-            border-color: var(--green);
-            color: var(--green);
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px; height: 14px;
+            background: var(--accent);
+            border-radius: 50%;
+            border: 2px solid #7ab0e0;
+            cursor: pointer;
         }
 
-        .sb-btn.green:hover {
-            background: rgba(25, 167, 37, .15);
+        input[type="range"]::-moz-range-thumb {
+            width: 14px; height: 14px;
+            background: var(--accent);
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
         }
 
-        .sb-btn.red {
-            border-color: var(--red);
-            color: var(--red);
-        }
-
-        .sb-btn.red:hover {
-            background: rgba(182, 9, 9, .15);
-        }
-
-        .sb-btn.accent {
-            border-color: var(--accent);
-            color: var(--accent);
-        }
-
-        .sb-btn.accent:hover {
-            background: rgba(179, 202, 48, .15);
-        }
-
-        select.sb-input option {
-            background: #1a2030;
-        }
+        select.sb-input option { background: #1e2430; }
 
         #status-bar {
             position: fixed;
-            bottom: 14px;
+            bottom: 12px;
             left: 270px;
             right: 14px;
             background: var(--surface);
             border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 7px 14px;
+            border-radius: 3px;
+            padding: 6px 12px;
             z-index: 1000;
             font-size: 11px;
             color: var(--muted);
-            backdrop-filter: blur(8px);
         }
 
         .map-tiles {
@@ -305,7 +270,7 @@
             <input class="sb-input" id="scen-name" type="text" placeholder="Scenario name…">
             <button class="sb-btn green" onclick="saveScenario()">Save Scenario</button>
             <select id="scen-load" class="sb-input">
-                <option value="">-- Load scenario --</option>
+                <option value="">Select scenario</option>
             </select>
             <button class="sb-btn" onclick="loadScenario()">Load Selected</button>
             <button class="sb-btn" onclick="deleteScenario()">Delete Selected</button>
@@ -330,7 +295,7 @@
                 style="width:100%;cursor:pointer;margin-bottom:10px;">
 
             <h2>Geofence Boundary</h2>
-            <button class="sb-btn" id="btn-geofence" onclick="toggleGeofenceMode()">Draw Geofence</button>
+            <button class="sb-btn" id="btn-geofence" onclick="toggleGeofenceMode()">Draw Geofence Polygon</button>
             <button class="sb-btn red" onclick="clearGeofence()" style="margin-top:2px;">Clear Geofence</button>
             <div id="geofence-hint" style="font-size:10px;color:var(--muted);margin-top:4px;min-height:14px;">No geofence set (agents roam freely)</div>
         </div>
@@ -434,7 +399,7 @@
 
         map.on('click', async (e) => {
             const { lat, lng: lon } = e.latlng;
-            if (_geofenceMode) { handleGeofenceClick(e); return; }
+            if (_geofenceMode) return;
             if (currentTool === 'erase') return;
             updateCentreMarker(lat, lon);
             try {
@@ -446,7 +411,7 @@
                 const d = await res.json();
                 placeMarker(lat, lon, currentTool, d.count - 1);
             } catch (ex) {
-                document.getElementById('status-bar').textContent = 'Backend offline — marker placed locally';
+                document.getElementById('status-bar').textContent = 'Backend offline - marker placed locally';
                 placeMarker(lat, lon, currentTool, placements.length);
             }
         });
@@ -536,11 +501,11 @@
                     status.textContent = 'Deployed! Redirecting...';
                     setTimeout(() => { window.location.href = 'mission.html'; }, 600);
                 } else {
-                    status.textContent = 'Server error — check backend.';
+                    status.textContent = 'Server error - check backend.';
                     btn.disabled = false; btn.textContent = 'Deploy Custom Mission';
                 }
             } catch (e) {
-                status.textContent = 'Connection failed — is backend running?';
+                status.textContent = 'Connection failed - is backend running?';
                 btn.disabled = false; btn.textContent = 'Deploy Custom Mission';
             }
         }
@@ -550,7 +515,7 @@
                 const d = await (await fetch(`${API}/api/scenario/list`)).json();
                 const sel = document.getElementById('scen-load');
                 const cur = sel.value;
-                sel.innerHTML = '<option value="">-- Load scenario --</option>';
+                sel.innerHTML = '<option value="">Select scenario</option>';
                 (d.scenarios || []).forEach(s => {
                     const opt = document.createElement('option');
                     opt.value = s.name; opt.textContent = s.name;
@@ -563,29 +528,75 @@
         // ── Geofence Draw Tool ──
         var _geofencePts = [];
         var _geofenceMarkers = [];
+        var _geofenceMidMarkers = [];
         var _geofenceLine = null;
         var _geofencePoly = null;
         var _geofenceMode = false;
+        var _snapPreviewLine = null;
+        var _snapHighlight = false;
+        var _dragVertexIdx = null;
+        var SNAP_PX = 20;
 
         function toggleGeofenceMode() {
             _geofenceMode = !_geofenceMode;
             var btn = document.getElementById('btn-geofence');
             if (_geofenceMode) {
-                btn.classList.add('active');
-                btn.textContent = 'Stop Drawing (dbl-click closes)';
+                btn.classList.add('active-geofence');
+                btn.textContent = 'Stop Drawing';
                 map.getContainer().style.cursor = 'crosshair';
+                map.on('click', handleGeofenceClick);
                 map.on('dblclick', closeGeofencePolygon);
-                document.getElementById('geofence-hint').textContent = 'Click to add vertex — double-click to close';
+                map.on('mousemove', handleGeofenceMove);
+                document.getElementById('geofence-hint').textContent = 'Click to add vertex - click near start point to close';
             } else {
-                btn.classList.remove('active');
-                btn.textContent = 'Draw Geofence';
-                map.getContainer().style.cursor = 'crosshair'; // back to normal tool
+                btn.classList.remove('active-geofence');
+                btn.textContent = 'Draw Geofence Polygon';
+                map.getContainer().style.cursor = currentTool === 'erase' ? 'not-allowed' : 'crosshair';
+                if (_snapPreviewLine) { map.removeLayer(_snapPreviewLine); _snapPreviewLine = null; }
+                _snapHighlight = false;
+                map.off('mousemove', handleGeofenceMove);
+                map.off('click', handleGeofenceClick);
                 map.off('dblclick', closeGeofencePolygon);
+            }
+        }
+
+        function handleGeofenceMove(e) {
+            if (_geofencePts.length === 0) return;
+            var last = _geofencePts[_geofencePts.length - 1];
+            if (_snapPreviewLine) map.removeLayer(_snapPreviewLine);
+            _snapPreviewLine = L.polyline([last, [e.latlng.lat, e.latlng.lng]], {
+                color: '#22c55e', weight: 1.5, dashArray: '4 4', opacity: 0.55
+            }).addTo(map);
+            if (_geofencePts.length >= 2 && _geofenceMarkers.length > 0) {
+                var firstPt = L.latLng(_geofencePts[0][0], _geofencePts[0][1]);
+                var cPx = map.latLngToLayerPoint(e.latlng);
+                var fPx = map.latLngToLayerPoint(firstPt);
+                var nearFirst = Math.hypot(cPx.x - fPx.x, cPx.y - fPx.y) <= SNAP_PX;
+                if (nearFirst !== _snapHighlight) {
+                    _snapHighlight = nearFirst;
+                    _geofenceMarkers[0].setStyle({
+                        color: nearFirst ? '#fff' : '#22c55e',
+                        fillColor: nearFirst ? '#fff' : '#22c55e',
+                        radius: nearFirst ? 9 : 5,
+                    });
+                    document.getElementById('geofence-hint').textContent = nearFirst
+                        ? 'Click to close polygon'
+                        : `${_geofencePts.length} vertices - click near start to close`;
+                }
             }
         }
 
         function handleGeofenceClick(e) {
             L.DomEvent.stopPropagation(e);
+            if (_geofencePts.length >= 2) {
+                var firstPt = L.latLng(_geofencePts[0][0], _geofencePts[0][1]);
+                var cPx = map.latLngToLayerPoint(e.latlng);
+                var fPx = map.latLngToLayerPoint(firstPt);
+                if (Math.hypot(cPx.x - fPx.x, cPx.y - fPx.y) <= SNAP_PX) {
+                    closeGeofencePolygon(e);
+                    return;
+                }
+            }
             _geofencePts.push([e.latlng.lat, e.latlng.lng]);
             var dot = L.circleMarker([e.latlng.lat, e.latlng.lng], {
                 radius: 5, color: '#22c55e', fillColor: '#22c55e', fillOpacity: 1, weight: 2
@@ -594,26 +605,104 @@
             if (_geofenceLine) map.removeLayer(_geofenceLine);
             if (_geofencePts.length >= 2)
                 _geofenceLine = L.polyline(_geofencePts, { color: '#22c55e', weight: 2, dashArray: '6 3' }).addTo(map);
-            document.getElementById('geofence-hint').textContent = `${_geofencePts.length} vertices — double-click to close`;
+            document.getElementById('geofence-hint').textContent = `${_geofencePts.length} vertices - click near start to close`;
         }
 
         function closeGeofencePolygon(e) {
             L.DomEvent.stopPropagation(e);
             if (_geofencePts.length < 3) return;
-            if (_geofenceLine) { map.removeLayer(_geofenceLine); _geofenceLine = null; }
+            if (_geofenceLine)    { map.removeLayer(_geofenceLine);    _geofenceLine = null; }
+            if (_snapPreviewLine) { map.removeLayer(_snapPreviewLine); _snapPreviewLine = null; }
+            _geofenceMarkers.forEach(m => map.removeLayer(m)); _geofenceMarkers = [];
+            rebuildGeofenceEditUI();
+            document.getElementById('geofence-hint').textContent = `Geofence: ${_geofencePts.length} pts - drag to reshape, right-click vertex to delete`;
+            if (_geofenceMode) toggleGeofenceMode();
+        }
+
+        function rebuildGeofenceEditUI() {
+            _geofenceMarkers.forEach(m => map.removeLayer(m)); _geofenceMarkers = [];
+            _geofenceMidMarkers.forEach(m => map.removeLayer(m)); _geofenceMidMarkers = [];
             if (_geofencePoly) map.removeLayer(_geofencePoly);
             _geofencePoly = L.polygon(_geofencePts, {
                 color: '#22c55e', weight: 2, fillColor: '#22c55e', fillOpacity: 0.10, dashArray: '8 4'
             }).addTo(map);
-            document.getElementById('geofence-hint').textContent = `Geofence set: ${_geofencePts.length} pts`;
-            toggleGeofenceMode();
+            _geofencePts.forEach(function(pt, i) {
+                var m = L.circleMarker(pt, {
+                    radius: 6, color: '#22c55e', fillColor: '#22c55e', fillOpacity: 1, weight: 2
+                }).addTo(map);
+                m.on('mousedown', function(ev) { L.DomEvent.stopPropagation(ev); startDragVertex(ev, i); });
+                m.on('click', function(ev) { L.DomEvent.stopPropagation(ev); });
+                m.on('contextmenu', function(ev) { L.DomEvent.stopPropagation(ev); deleteVertex(i); });
+                _geofenceMarkers.push(m);
+            });
+            for (var i = 0; i < _geofencePts.length; i++) {
+                (function(idx) {
+                    var j = (idx + 1) % _geofencePts.length;
+                    var mid = L.circleMarker([
+                        (_geofencePts[idx][0] + _geofencePts[j][0]) / 2,
+                        (_geofencePts[idx][1] + _geofencePts[j][1]) / 2
+                    ], { radius: 4, color: '#22c55e', fillColor: '#fff', fillOpacity: 0.6, weight: 1.5 }).addTo(map);
+                    mid.on('click', function(ev) { L.DomEvent.stopPropagation(ev); insertVertex(idx, [ev.latlng.lat, ev.latlng.lng]); });
+                    _geofenceMidMarkers.push(mid);
+                })(i);
+            }
+        }
+
+        function startDragVertex(e, idx) {
+            if (_geofenceMode) return;
+            _dragVertexIdx = idx;
+            map.dragging.disable();
+            map.on('mousemove', onDragVertex);
+            map.on('mouseup', stopDragVertex);
+        }
+
+        function onDragVertex(e) {
+            if (_dragVertexIdx === null) return;
+            var pt = [e.latlng.lat, e.latlng.lng];
+            _geofencePts[_dragVertexIdx] = pt;
+            _geofenceMarkers[_dragVertexIdx].setLatLng(pt);
+            if (_geofencePoly) _geofencePoly.setLatLngs(_geofencePts);
+            for (var i = 0; i < _geofencePts.length; i++) {
+                var j = (i + 1) % _geofencePts.length;
+                if (_geofenceMidMarkers[i]) _geofenceMidMarkers[i].setLatLng([
+                    (_geofencePts[i][0] + _geofencePts[j][0]) / 2,
+                    (_geofencePts[i][1] + _geofencePts[j][1]) / 2
+                ]);
+            }
+        }
+
+        function stopDragVertex() {
+            _dragVertexIdx = null;
+            map.dragging.enable();
+            map.off('mousemove', onDragVertex);
+            map.off('mouseup', stopDragVertex);
+        }
+
+        function insertVertex(afterIdx, pt) {
+            _geofencePts.splice(afterIdx + 1, 0, pt);
+            rebuildGeofenceEditUI();
+            document.getElementById('geofence-hint').textContent = `Geofence: ${_geofencePts.length} pts`;
+        }
+
+        function deleteVertex(idx) {
+            if (_geofencePts.length <= 3) {
+                document.getElementById('geofence-hint').textContent = 'Need at least 3 vertices - use Clear instead';
+                return;
+            }
+            _geofencePts.splice(idx, 1);
+            rebuildGeofenceEditUI();
+            document.getElementById('geofence-hint').textContent = `Geofence: ${_geofencePts.length} pts`;
         }
 
         function clearGeofence() {
+            if (_geofenceMode) toggleGeofenceMode();
             _geofencePts = [];
             _geofenceMarkers.forEach(m => map.removeLayer(m)); _geofenceMarkers = [];
-            if (_geofenceLine) { map.removeLayer(_geofenceLine);  _geofenceLine = null; }
-            if (_geofencePoly) { map.removeLayer(_geofencePoly);  _geofencePoly = null; }
+            _geofenceMidMarkers.forEach(m => map.removeLayer(m)); _geofenceMidMarkers = [];
+            if (_geofenceLine)    { map.removeLayer(_geofenceLine);    _geofenceLine = null; }
+            if (_geofencePoly)    { map.removeLayer(_geofencePoly);    _geofencePoly = null; }
+            if (_snapPreviewLine) { map.removeLayer(_snapPreviewLine); _snapPreviewLine = null; }
+            _snapHighlight = false;
             document.getElementById('geofence-hint').textContent = 'No geofence set (agents roam freely)';
             fetch(`${API}/api/sim/geofence`, { method: 'DELETE' }).catch(() => {});
         }

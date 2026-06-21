@@ -1,7 +1,7 @@
-# V12.0 — Backend self-drive loop, browser mission view, enemy pathfinding fix
+# V12.0 - Backend self-drive loop, browser mission view, enemy pathfinding fix
 from __future__ import annotations
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import osmnx as ox
@@ -13,11 +13,13 @@ import threading
 import traceback
 import logging
 import pandas as pd
+import numpy as np
 import random
 import math
 import json
 import os
 import time
+import concurrent.futures
 
 # --- ANSI DEBUG COLORS ---
 class C:
@@ -48,6 +50,18 @@ ROBOT_SPEED   = 6.0
 TICK_RATE     = 0.2
 sim_speed_multiplier: float = 1.0
 
+FLOOR_HEIGHT_M            = 3.2   # average floor-to-floor in metres
+DEFAULT_BUILDING_HEIGHT_M = 9.0   # ~3 floors when OSM height data absent
+
+# Physical road widths in metres - used for agent lateral positioning
+HW_WIDTH_M = {
+    "motorway": 11.0, "motorway_link": 5.5, "trunk": 9.0,  "trunk_link": 5.5,
+    "primary":   8.0, "primary_link":  5.0, "secondary": 7.0, "secondary_link": 4.5,
+    "tertiary":  6.0, "tertiary_link": 4.0, "unclassified": 5.0, "residential": 5.0,
+    "living_street": 4.0, "service": 4.0, "track": 3.5,
+    "path": 2.0, "footway": 2.0, "cycleway": 2.5, "steps": 2.0,
+}
+
 _sim_lock = threading.Lock()  # protects game_logic from concurrent writes
 
 # app is created without lifespan here; lifespan is wired in after its definition below.
@@ -56,30 +70,11 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
                    allow_methods=["*"], allow_headers=["*"])
 
 # --- 3. DATA MODELS ---
-class RobotPosition(BaseModel):
-    x: float
-    y: float
-    delta: float = 0.5
-
-class VectorPathRequest(BaseModel):
-    start_x: float; start_y: float; end_x: float; end_y: float
-
-class GeoPoint(BaseModel):
-    lat: float
-    lon: float
-
-class GeofencePolygon(BaseModel):
-    points: list[GeoPoint]  # >= 3 points
-
-class WaypointItem(BaseModel):
-    id: int
-    lat: float
-    lon: float
-    label: str = ""
-
-class WaypointList(BaseModel):
-    waypoints: list[WaypointItem]
-    loop: bool = False
+from .models import (
+    RobotPosition, VectorPathRequest, GeoPoint, GeofencePolygon,
+    WaypointItem, WaypointList, SpeedRequest, PlacementRequest,
+    ScenarioSaveRequest
+)
 
 # --- 4. GAME LOGIC CLASSES & HELPERS ---
 
@@ -129,12 +124,18 @@ class Enemy:
         self.current_path  = []
         self.current_node  = start_node
         self.previous_node = None
+        self._fail_ticks   = 0
         n = G.nodes[start_node]
         self.x = round(n['x'] - cx, 2)
         self.y = round(n['y'] - cy, 2)
         # Direction & collision
         self.heading       = 0.0   # math degrees: 0=East, 90=North
         self.hitbox_radius = 0.8   # metres
+        # Lateral positioning within road width
+        self.lateral_t       = 0.0   # −1=left  +1=right
+        self.road_half_width = 3.0   # metres
+        self.phys_x          = self.x
+        self.phys_y          = self.y
 
     def calculate_path_coords(self, path_nodes):
         coords = []
@@ -168,18 +169,22 @@ class Enemy:
             if neighbors:
                 next_node = random.choice(neighbors)
                 return [self.current_node, next_node]
+            # Dead-end: allow backtrack to previous node
+            all_nb = list(self.G.neighbors(self.current_node))
+            if all_nb:
+                return [self.current_node, random.choice(all_nb)]
         elif self.type == "aggressive":
             try:
-                # Guard against disconnected nodes to prevent spammy failures
-                if not nx.has_path(self.G, self.current_node, robot_node):
-                    return []
                 path = nx.shortest_path(self.G, self.current_node, robot_node, weight='length')
                 if len(path) > 1:
                     return [path[0], path[1]]
                 elif len(path) == 1:
                     return path
-            except:
-                pass
+            except Exception:
+                # No graph path - fall back to random neighbour to keep moving
+                neighbors = list(self.G.neighbors(self.current_node))
+                if neighbors:
+                    return [self.current_node, random.choice(neighbors)]
         return []
 
     def move(self, robot_node, robot_x, robot_y, delta_t):
@@ -203,9 +208,23 @@ class Enemy:
                 self.previous_node = self.current_node
                 self.current_path  = self.calculate_path_coords(node_path)
                 self.current_node  = node_path[-1]
+                self._fail_ticks   = 0
                 print(f"{C.ENEMY}[ENEMY-{self.id}] {self.type.upper()} Mode: New Path | Node:{self.current_node} | Pts:{len(self.current_path)}{C.END}")
             else:
-                print(f"{C.ERR}[ENEMY-{self.id}] FAILED to find path!{C.END}")
+                self._fail_ticks += 1
+                if self._fail_ticks == 1 or self._fail_ticks % 60 == 0:
+                    print(f"{C.ERR}[ENEMY-{self.id}] FAILED to find path (tick {self._fail_ticks}){C.END}")
+                # After 10 consecutive failures, snap to a random graph node to escape
+                if self._fail_ticks >= 10:
+                    nodes = list(self.G.nodes)
+                    if nodes:
+                        self.current_node  = random.choice(nodes)
+                        n = self.G.nodes[self.current_node]
+                        self.x = round(n['x'] - self.cx, 2)
+                        self.y = round(n['y'] - self.cy, 2)
+                        self.previous_node = None
+                        self._fail_ticks   = 0
+                        print(f"{C.WARN}[ENEMY-{self.id}] Snapped to node {self.current_node} to escape stuck state{C.END}")
 
         move_dist_remaining = self.speed * delta_t
         while len(self.current_path) > 0 and move_dist_remaining > 0:
@@ -231,6 +250,22 @@ class Enemy:
                 self.heading = math.degrees(math.atan2(dir_y, dir_x))
                 move_dist_remaining = 0
 
+        # Lateral drift within road width
+        if self.type == "patrol":
+            self.lateral_t = max(-0.8, min(0.8, self.lateral_t + random.gauss(0, 0.012)))
+        # Compute physical (laterally-offset) position from nav centreline
+        if self.current_path:
+            tgt = self.current_path[0]
+            fdx = tgt['x'] - self.x; fdy = tgt['y'] - self.y
+            fd  = math.hypot(fdx, fdy)
+            if fd > 0.01:
+                px = -fdy / fd; py = fdx / fd
+                self.phys_x = round(self.x + px * self.lateral_t * self.road_half_width, 2)
+                self.phys_y = round(self.y + py * self.lateral_t * self.road_half_width, 2)
+                return
+        self.phys_x = self.x
+        self.phys_y = self.y
+
 
 # ---------------------------------------------------------------------------
 #  SENSORS (Phase 4)
@@ -251,17 +286,20 @@ class CameraSensor:
         for e in entities:
             if not e.active if hasattr(e, 'active') else False:
                 continue
-            dx = e.x - agent_x
-            dy = e.y - agent_y
+            # Use physical (laterally-offset) position when available
+            e_x = getattr(e, 'phys_x', e.x)
+            e_y = getattr(e, 'phys_y', e.y)
+            dx = e_x - agent_x
+            dy = e_y - agent_y
             dist = math.hypot(dx, dy)
             if dist > self.range_m: continue
-            
+
             angle_to_e = math.degrees(math.atan2(dy, dx))
             rel_angle = (angle_to_e - agent_heading)
             rel_angle = (rel_angle + 180) % 360 - 180
-            
+
             if abs(rel_angle) <= self.fov_deg / 2.0:
-                if line_of_sight((agent_x, agent_y), (e.x, e.y)):
+                if line_of_sight((agent_x, agent_y), (e_x, e_y)):
                     detections.append(SensorDetection(
                         type=e.type, obj_id=e.id, dist_m=round(dist,1),
                         # Negate: math CCW = camera-left; we want +right convention
@@ -294,7 +332,6 @@ class LiDARSensor:
             except TypeError: pass
             
             for item in potential:
-                import numpy as np
                 if isinstance(item, (int, np.integer, numbers.Integral)):
                     geom = bldg_tree.geometries.take(item) if hasattr(bldg_tree, 'geometries') else current_map_data["buildings_proj"][item]["geometry"]
                 else:
@@ -339,14 +376,38 @@ class AgentState:
         # Phase 4 Sensors
         self.heading         = 0.0  # math degrees (0=East, 90=North)
         self.hitbox_radius   = 0.8  # metres - physical footprint of the robot
-        self.camera          = CameraSensor()
+        self.camera          = CameraSensor(fov_deg=90.0, range_m=80.0)
         self.lidar           = LiDARSensor()
         self.current_detections = []
         self.lidar_scan      = []
+        self._sensor_tick    = 0   # throttle counter for expensive LiDAR scans
+        # Lateral positioning within road width
+        self.lateral_t       = 0.0       # −1=left  +1=right on road
+        self.road_half_width = 3.0       # metres, updated from edge data on node change
+        self.phys_x          = self.robot_x   # physical (laterally-offset) position
+        self.phys_y          = self.robot_y
 
-    def update_sensors(self, enemies):
-        self.current_detections = self.camera.scan(self.robot_x, self.robot_y, self.heading, enemies)
-        self.lidar_scan = self.lidar.scan(self.robot_x, self.robot_y, self.heading)
+    def update_sensors(self, enemies, targets=None):
+        # Build entity list: enemies + targets (wrapped as proxy objects for the scanner)
+        class _TargetProxy:
+            __slots__ = ('active', 'x', 'y', 'type', 'id')
+        entities = list(enemies)
+        if targets:
+            for t in targets:
+                p = _TargetProxy()
+                p.active = True
+                p.x = t['x']
+                p.y = t['y']
+                p.type = 'target'
+                p.id = t['id']
+                entities.append(p)
+        # Camera detections are cheap (distance+angle checks) - run every tick
+        self.current_detections = self.camera.scan(self.phys_x, self.phys_y, self.heading, entities)
+        # LiDAR is expensive (36 raycasts against building STRtree) - throttle to every 5th tick (~1s)
+        self._sensor_tick += 1
+        if self._sensor_tick >= 5 or not self.lidar_scan:
+            self._sensor_tick = 0
+            self.lidar_scan = self.lidar.scan(self.phys_x, self.phys_y, self.heading)
 
 # ---------------------------------------------------------------------------
 #  TERRAIN COST CONFIG (mirrors SARGV-FIN-CC.py TILE_TYPE_DIFFICULT/HAZARD)
@@ -396,67 +457,7 @@ HIGHWAY_MULTIPLIER = {
     "steps":         4.0,
 }
 
-
-def build_penalized_graph(G, enemies, cx=0.0, cy=0.0):
-    """Return a copy of G with tiered enemy risk penalties and geofence penalties applied."""
-    U = G.to_undirected() if G.is_directed() else G.copy()
-    geofence = game_logic.geofence_poly if 'game_logic' in dir() else None
-    for u, v, k, data in U.edges(keys=True, data=True):
-        ux, uy = U.nodes[u]['x'], U.nodes[u]['y']
-        vx, vy = U.nodes[v]['x'], U.nodes[v]['y']
-        # Geofence: massive penalty if edge endpoints are outside polygon (projected)
-        if geofence is not None:
-            mid_x, mid_y = (ux + vx) / 2.0, (uy + vy) / 2.0
-            if not geofence.contains(Point(mid_x, mid_y)):
-                data['length'] = data.get('length', 1.0) + 6000.0
-    for enemy in enemies:
-        ex, ey     = enemy.x + cx, enemy.y + cy
-        radius     = enemy.detection_radius
-        ext_radius = radius + 30.0
-        aggr_mult  = 1.5 if enemy.type == "aggressive" else 1.0
-        for u, v, k, data in U.edges(keys=True, data=True):
-            ux, uy = U.nodes[u]['x'], U.nodes[u]['y']
-            vx, vy = U.nodes[v]['x'], U.nodes[v]['y']
-            mid_x, mid_y = (ux + vx) / 2.0, (uy + vy) / 2.0
-            closest_dist = min(
-                math.hypot(mid_x - ex, mid_y - ey),
-                math.hypot(ux    - ex, uy    - ey),
-                math.hypot(vx    - ex, vy    - ey),
-            )
-            if   closest_dist == 0:          penalty = 8000.0
-            elif closest_dist <= 10.0:       penalty = 3000.0
-            elif closest_dist <= 30.0:       penalty = 1500.0
-            elif closest_dist <= radius:     penalty = 800.0
-            elif closest_dist <= ext_radius: penalty = 300.0
-            else:                            penalty = 0.0
-            if penalty > 0:
-                data['length'] = data.get('length', 1.0) + penalty * aggr_mult
-    return U
-
-
-def compute_dead_ends(G):
-    """Return set of node ids with degree ≤ 1 (dead-end cul-de-sacs)."""
-    return {n for n in G.nodes() if G.degree(n) <= 1}
-
-
-def densify_path(path_coords, step_meters=2.0):
-    if len(path_coords) < 2:
-        return path_coords
-    new_path = []
-    for i in range(len(path_coords) - 1):
-        p1, p2 = path_coords[i], path_coords[i + 1]
-        new_path.append(p1)
-        dist = ((p2["x"] - p1["x"])**2 + (p2["y"] - p1["y"])**2)**0.5
-        if dist > step_meters:
-            num_segments = int(dist / step_meters)
-            for j in range(1, num_segments + 1):
-                t = j / (num_segments + 1)
-                new_path.append({
-                    "x": round(p1["x"] + (p2["x"] - p1["x"]) * t, 2),
-                    "y": round(p1["y"] + (p2["y"] - p1["y"]) * t, 2)
-                })
-    new_path.append(path_coords[-1])
-    return new_path
+from .pathfinding import build_penalized_graph, compute_dead_ends, densify_path
 
 
 def save_stats_to_disk(stats_history, score, status, n_agents=1):
@@ -696,18 +697,23 @@ class SARGameState:
                 if not ag.escape_mode and not ag.last_decision.startswith("CORNER"):
                     ag.last_decision = "CORNER PEEK"
 
-        # ── Hitbox: check next waypoint for enemy proximity ───────────────
+        # ── Path lookahead: check next 12 waypoints (~24 m) for enemy proximity ─
         if ag.robot_auto_path:
-            wp = ag.robot_auto_path[0]
-            for e in self.enemies:
-                d_to_wp = math.hypot(wp['x'] - e.x, wp['y'] - e.y)
-                clearance = ag.hitbox_radius + e.hitbox_radius + 0.4  # tiny buffer
-                if d_to_wp < clearance:
-                    # Next waypoint is inside an enemy's hitbox → replan immediately
-                    ag.robot_auto_path.clear()
-                    ag.replan_timer = self.REPLAN_INTERVAL   # force replan next tick
-                    ag.last_decision = f"BLOCKED: hitbox conflict, replanning"
-                    return
+            prev = {'x': ag.robot_x, 'y': ag.robot_y}
+            accum = 0.0
+            for wp in ag.robot_auto_path[:12]:
+                accum += math.hypot(wp['x'] - prev['x'], wp['y'] - prev['y'])
+                # Danger zone shrinks with distance: 10 m immediate, ~4 m at 24 m ahead
+                danger = max(4.0, 10.0 - accum * 0.25)
+                for e in self.enemies:
+                    if math.hypot(wp['x'] - e.x, wp['y'] - e.y) < danger:
+                        ag.robot_auto_path.clear()
+                        ag.replan_timer = self.REPLAN_INTERVAL
+                        ag.last_decision = f"PATH BLOCKED: enemy {e.id} in route"
+                        return
+                prev = wp
+                if accum > 24.0:
+                    break
 
         dist_to_move = ag.robot_speed_ms * corner_slowing * delta_t
 
@@ -731,11 +737,30 @@ class SARGameState:
                 ag.heading  = math.degrees(math.atan2(dy, dx))
                 dist_to_move = 0
 
+        # Physical position: apply lateral offset perpendicular to movement direction
+        fwd_x = fwd_y = 0.0
+        if ag.robot_auto_path:
+            wp0 = ag.robot_auto_path[0]
+            dx0 = wp0['x'] - ag.robot_x; dy0 = wp0['y'] - ag.robot_y
+            d0  = math.hypot(dx0, dy0)
+            if d0 > 0.01:
+                fwd_x = dx0 / d0; fwd_y = dy0 / d0
+        if fwd_x or fwd_y:
+            ag.phys_x = round(ag.robot_x + (-fwd_y) * ag.lateral_t * ag.road_half_width, 2)
+            ag.phys_y = round(ag.robot_y + fwd_x    * ag.lateral_t * ag.road_half_width, 2)
+        else:
+            ag.phys_x = ag.robot_x
+            ag.phys_y = ag.robot_y
+
     # ------------------------------------------------------------------
     # ESCAPE PATH (per-agent)
     # ------------------------------------------------------------------
     def find_escape_path(self, G, ag: AgentState, penalized_G, cx, cy):
+        # Escape is for aggressive chasers; patrol avoidance is handled by penalized graph re-routing
         visible_enemy_ids = {d.obj_id for d in ag.current_detections if d.type == 'aggressive'}
+        for e in self.enemies:
+            if e.base_type == 'aggressive' and math.hypot(ag.robot_x - e.x, ag.robot_y - e.y) < e.detection_radius:
+                visible_enemy_ids.add(e.id)
         threatening = [e for e in self.enemies if e.id in visible_enemy_ids and e.type == 'aggressive']
         if not threatening:
             return []
@@ -792,62 +817,91 @@ class SARGameState:
     # BRAVE PATH (per-agent)
     # ------------------------------------------------------------------
     def find_brave_path(self, G, ag: AgentState, target, cx, cy):
-        # Only evade aggressive enemies that the agent currently sees via sensors
-        visible_enemy_ids = {d.obj_id for d in ag.current_detections if d.type == 'aggressive'}
-        threatening = [e for e in self.enemies if e.id in visible_enemy_ids and e.type == 'aggressive']
-        
+        # Evade all detected enemies (aggressive and patrol)
+        visible_enemy_ids = {d.obj_id for d in ag.current_detections if d.type in ['aggressive', 'patrol']}
+        for e in self.enemies:
+            if math.hypot(ag.robot_x - e.x, ag.robot_y - e.y) < e.detection_radius:
+                visible_enemy_ids.add(e.id)
+        threatening = [e for e in self.enemies if e.id in visible_enemy_ids]
+
         target_node = target['node']
         robot_node  = ag.robot_node
+        # Use the real (unpenalized) graph for fair distance comparisons
+        G_real = current_map_data.get('G_proj')
+        if G_real is None:
+            return []
         try:
-            if G.degree(target_node) <= 1:
+            if G_real.degree(target_node) <= 1:
                 return []
         except:
             pass
         try:
             node_path   = nx.shortest_path(G, robot_node, target_node, weight='length')
-            robot_steps = nx.shortest_path_length(G, robot_node, target_node, weight='length')
+            robot_steps = nx.shortest_path_length(G_real, robot_node, target_node, weight='length')
         except:
             return []
         for e in threatening:
+            # Race check only applies to aggressive enemies actively chasing;
+            # patrol enemies wander randomly and aren't racing the agent to the target.
+            if e.base_type != 'aggressive' or e.type != 'aggressive':
+                continue
             try:
-                e_node = ox.distance.nearest_nodes(current_map_data['G_proj'], e.x + cx, e.y + cy)
-                enemy_steps = nx.shortest_path_length(
-                    current_map_data['G_proj'], e_node, target_node, weight='length')
+                e_node = ox.distance.nearest_nodes(G_real, e.x + cx, e.y + cy)
+                enemy_steps = nx.shortest_path_length(G_real, e_node, target_node, weight='length')
             except:
                 enemy_steps = 999999
-            if robot_steps + 1 >= enemy_steps:
+            if robot_steps >= enemy_steps:
                 return []
-        coords = _extract_path_coords_centred(current_map_data['G_proj'], node_path, cx, cy)
+        coords = _extract_path_coords_centred(G_real, node_path, cx, cy)
         return densify_path(coords, 2.0)
 
     # ------------------------------------------------------------------
     # AUTONOMOUS RE-ROUTING (per-agent)
     # ------------------------------------------------------------------
-    REPLAN_INTERVAL = 5
+    REPLAN_INTERVAL = 12
 
     def autonomous_replan(self, G, ag: AgentState, cx, cy):
         ag.replan_timer += 1
         if ag.replan_timer < self.REPLAN_INTERVAL and ag.robot_auto_path:
-            return
+            # Danger override: skip timer when any enemy is within 15 m
+            danger_close = any(
+                math.hypot(ag.robot_x - e.x, ag.robot_y - e.y) < 15.0
+                for e in self.enemies
+            )
+            if not danger_close:
+                return
         ag.replan_timer = 0
         if not self.targets:
             return
 
-        # 1. Evaluate space and maneuverability based ONLY on active sensor detections
+        # Primary: sensor-detected enemies; fallback: aggressive enemies within detection radius
         visible_enemy_ids = {d.obj_id for d in ag.current_detections if d.type in ['aggressive', 'patrol']}
+        for e in self.enemies:
+            if e.base_type == 'aggressive':
+                dist = math.hypot(ag.robot_x - e.x, ag.robot_y - e.y)
+                if dist < e.detection_radius * 1.1:
+                    visible_enemy_ids.add(e.id)
         known_enemies = [e for e in self.enemies if e.id in visible_enemy_ids]
         
-        penalized_G = build_penalized_graph(G, known_enemies, cx, cy)
+        penalized_G = build_penalized_graph(G, known_enemies, geofence=self.geofence_poly, cx=cx, cy=cy)
         threatening  = [e for e in known_enemies if e.base_type == 'aggressive' and e.type == 'aggressive']
         blocking     = [e for e in known_enemies if e.base_type == 'patrol']
-        
+
+        nearest_dist   = 999.0
+        evade_threshold = 0.0
+
         if threatening or blocking:
-            nearest_dist = min((d.dist_m for d in ag.current_detections if d.obj_id in {e.id for e in known_enemies}), default=999)
+            # Use direct Euclidean distance for ALL known enemies, not just sensor-detected ones
+            # (sensor data may miss enemies added via direct proximity check)
+            nearest_dist = min(
+                (math.hypot(ag.robot_x - e.x, ag.robot_y - e.y) for e in known_enemies),
+                default=999
+            )
             det_r = self.enemies[0].detection_radius if self.enemies else 50.0
-            
+
             # Evasion distance: longer for aggressive, closer for patrol evaluation
             evade_threshold = (1.5 * det_r) if threatening else (0.8 * det_r)
-            
+
             if nearest_dist < evade_threshold:
                 best_t = self._pick_best_target(penalized_G, ag)
                 if best_t:
@@ -869,11 +923,32 @@ class SARGameState:
                     ag.last_decision     = (f"ESCAPE: fleeing ({nearest_dist:.0f}m)")
                     return
 
+        has_active_threat = bool(threatening or blocking) and nearest_dist < evade_threshold
+
         best_t = self._pick_best_target(penalized_G, ag)
         if not best_t:
             return
-        if best_t['id'] == ag.current_target_id and ag.robot_auto_path:
+
+        # Only skip path recompute when no active threats: when threatened we must
+        # refresh the route through the penalized graph even to the same target,
+        # otherwise the agent keeps following its pre-threat stale path into the enemy.
+        if best_t['id'] == ag.current_target_id and ag.robot_auto_path and not has_active_threat:
             return
+
+        # Target-switching hysteresis (only when not threatened): if we already have a path
+        # to the current target, only switch when nearly done (<8 waypoints) or the new pick
+        # is at least 25% cheaper - prevents oscillation from fluctuating enemy penalties.
+        if not has_active_threat and ag.current_target_id is not None and len(ag.robot_auto_path) >= 8:
+            cur_t = next((t for t in self.targets if t['id'] == ag.current_target_id), None)
+            if cur_t:
+                try:
+                    cur_cost = nx.shortest_path_length(penalized_G, ag.robot_node, cur_t['node'], weight='length')
+                    new_cost = nx.shortest_path_length(penalized_G, ag.robot_node, best_t['node'], weight='length')
+                    if new_cost >= cur_cost * 0.75:
+                        return  # not enough improvement - stay on current target
+                except Exception:
+                    pass
+
         try:
             node_path = nx.shortest_path(penalized_G, ag.robot_node, best_t['node'], weight='length')
             ag.robot_auto_path   = densify_path(_extract_path_coords_centred(G, node_path, cx, cy), 2.0)
@@ -883,6 +958,26 @@ class SARGameState:
             print(f"{C.AGENT}[A{ag.id}] {ag.last_decision}{C.END}")
         except Exception as e:
             print(f"{C.ERR}[A{ag.id}] replan failed: {e}{C.END}")
+
+        # --- Lateral avoidance: shift to opposite side of road from nearest threat ---
+        all_threats = threatening + blocking
+        if all_threats and ag.robot_auto_path:
+            wp0 = ag.robot_auto_path[0]
+            fwd_x = wp0['x'] - ag.robot_x; fwd_y = wp0['y'] - ag.robot_y
+            fd = math.hypot(fwd_x, fwd_y)
+            if fd > 0.01:
+                fwd_x /= fd; fwd_y /= fd
+                nearest_e = min(all_threats,
+                                key=lambda e: math.hypot(e.phys_x - ag.phys_x,
+                                                          e.phys_y - ag.phys_y))
+                # Cross product sign tells which side the threat is on
+                cross = (fwd_x * (nearest_e.phys_y - ag.phys_y)
+                         - fwd_y * (nearest_e.phys_x - ag.phys_x))
+                target_lat = 0.85 if cross > 0 else -0.85   # push to opposite side
+                ag.lateral_t = ag.lateral_t * 0.75 + target_lat * 0.25
+        else:
+            # No active threats: relax smoothly back to centreline
+            ag.lateral_t *= 0.90
 
     def _pick_best_target(self, penalized_G, ag: AgentState):
         """Pick lowest-cost target; prefer assigned target; in waypoint_mode follow index order."""
@@ -896,9 +991,12 @@ class SARGameState:
                 cost = nx.shortest_path_length(penalized_G, ag.robot_node, t['node'], weight='length')
                 if t['node'] in ag.dead_ends:
                     cost += 200
-                # Bonus for pre-assigned target to guide agents apart
-                if t['id'] == ag.assigned_target_id:
-                    cost -= cost * 0.15  # 15% preference discount
+                # Strong discount for the actively-pursued target to reduce oscillation,
+                # smaller discount for pre-assigned to guide agents apart.
+                if t['id'] == ag.current_target_id:
+                    cost -= cost * 0.25  # 25% inertia discount (currently pursuing)
+                elif t['id'] == ag.assigned_target_id:
+                    cost -= cost * 0.10  # 10% preference discount (pre-assigned hint)
                 if cost < best_cost:
                     best_cost = cost; best_t = t
             except:
@@ -921,9 +1019,9 @@ class SARGameState:
                 continue
 
             # Update sensors (Camera + LiDAR)
-            ag.update_sensors(self.enemies)
+            ag.update_sensors(self.enemies, self.targets)
 
-            # Terrain penalty
+            # Terrain penalty + road width update
             if ag._last_robot_node is not None and ag.robot_node != ag._last_robot_node:
                 edge_data = G.get_edge_data(ag._last_robot_node, ag.robot_node)
                 if edge_data:
@@ -934,11 +1032,13 @@ class SARGameState:
                     if penalty:
                         ag.score -= penalty
                         ag.terrain_penalty += penalty
+                    ag.road_half_width = data.get('half_width_m',
+                                                  HW_WIDTH_M.get(hw, 3.0))
             ag._last_robot_node = ag.robot_node
 
             # Target collection (any agent collects = removed for all)
             for t in self.targets[:]:
-                dist = math.hypot(t['x'] - ag.robot_x, t['y'] - ag.robot_y)
+                dist = math.hypot(t['x'] - ag.phys_x, t['y'] - ag.phys_y)
                 if dist < 8.0:
                     self.targets.remove(t)
                     ag.score += 50
@@ -997,7 +1097,7 @@ class SARGameState:
         for ag in active_agents:
             for enemy in self.enemies:
                 enemy.move(ag.robot_node, ag.robot_x, ag.robot_y, delta_t)
-                dist = math.hypot(enemy.x - ag.robot_x, enemy.y - ag.robot_y)
+                dist = math.hypot(enemy.phys_x - ag.phys_x, enemy.phys_y - ag.phys_y)
                 warn_key = f'prox_{enemy.id}_{ag.id}'
                 if dist < enemy.detection_radius * 2.0:
                     if self._proximity_cooldowns.get(warn_key, 0) <= 0:
@@ -1015,13 +1115,16 @@ class SARGameState:
         if all_incapacitated and self.agents:
             targets_collected = self.targets_total - len(self.targets)
             frac = targets_collected / max(self.targets_total, 1)
-            self.status_message = ('MISSION PARTIAL SUCCESS (>70% targets)'
-                                   if frac > 0.70 else 'MISSION FAILED: ENEMY CONTACT')
             self.game_over = True
-            if not self.stats_saved:
-                save_stats_to_disk(self.stats_history, self.score,
-                                   self.status_message, len(self.agents))
-                self.stats_saved = True
+            if frac > 0.70:
+                self.status_message = 'MISSION PARTIAL SUCCESS (>70% targets)'
+                if not self.stats_saved:
+                    save_stats_to_disk(self.stats_history, self.score,
+                                       self.status_message, len(self.agents))
+                    self.stats_saved = True
+            else:
+                self.status_message = 'MISSION FAILED: ENEMY CONTACT'
+                self.stats_saved = True  # not recorded to history
 
 
 # ---------------------------------------------------------------------------
@@ -1104,9 +1207,49 @@ async def simulation_loop():
                     robot_state["lon"] = lon0
 
                 game_logic.update(G, effective_dt, cx, cy)
+                
+                # Create a task to run the broadcast concurrently
+                asyncio.create_task(broadcast_sim_state())
             except Exception as exc:
                 print(f"{C.ERR}[SIM LOOP] {exc}{C.END}")
 
+
+# ---------------------------------------------------------------------------
+# WEBSOCKET BROADCASTING
+# ---------------------------------------------------------------------------
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            try:
+                await connection.send_text(message)
+            except:
+                pass
+
+manager = ConnectionManager()
+
+@app.websocket("/ws/simulation")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
+async def broadcast_sim_state():
+    """Asynchronously builds and broadcasts the simulation state to all websocket clients."""
+    payload = get_robot_position()  # get_robot_position returns the dict
+    await manager.broadcast(json.dumps(payload))
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -1135,7 +1278,7 @@ current_map_data = {
 game_logic  = SARGameState()
 robot_state = {"lat": None, "lon": None, "agents": {}}
 
-# Editor state — temporary placements before deploying
+# Editor state - temporary placements before deploying
 editor_state: list = []   # list of {type, lat, lon, lon_proj, lat_proj}
 custom_mode: bool = False  # True when /api/map/vector is called with mode=custom
 
@@ -1198,13 +1341,14 @@ def get_robot_position():
         lon, lat = transformer.transform(e.x + cx, e.y + cy)
         enemies_latlon.append({
             "id": e.id, "type": e.type, "lat": lat, "lon": lon,
+            "x": e.x, "y": e.y,
             "detection_radius_m": e.detection_radius
         })
 
     targets_latlon = []
     for t in game_logic.targets:
         lon, lat = transformer.transform(t['x'] + cx, t['y'] + cy)
-        targets_latlon.append({"id": t['id'], "lat": lat, "lon": lon})
+        targets_latlon.append({"id": t['id'], "lat": lat, "lon": lon, "x": t['x'], "y": t['y']})
 
     # Per-agent position + path
     agents_out = []
@@ -1218,18 +1362,25 @@ def get_robot_position():
             except:
                 pass
         agents_out.append({
-            "id":         ag.id,
-            "color":      ag.color,
-            "lat":        ag_st.get("lat"),
-            "lon":        ag_st.get("lon"),
-            "heading":    ag.heading,
-            "auto_path":  path_ll,
-            "score":      ag.score,
-            "escape_mode": ag.escape_mode,
-            "active":     ag.active,
-            "last_decision": ag.last_decision,
-            "camera":     [d.model_dump() for d in ag.current_detections],
-            "lidar":      ag.lidar_scan,
+            "id":              ag.id,
+            "color":           ag.color,
+            "lat":             ag_st.get("lat"),
+            "lon":             ag_st.get("lon"),
+            "x":               ag.robot_x,
+            "y":               ag.robot_y,
+            "phys_x":          ag.phys_x,
+            "phys_y":          ag.phys_y,
+            "lateral_t":       ag.lateral_t,
+            "road_half_width": ag.road_half_width,
+            "heading":         ag.heading,
+            "heading_compass": ((90 - ag.heading) % 360 + 360) % 360,
+            "auto_path":       path_ll,
+            "score":           ag.score,
+            "escape_mode":     ag.escape_mode,
+            "active":          ag.active,
+            "last_decision":   ag.last_decision,
+            "camera":          [d.model_dump() for d in ag.current_detections],
+            "lidar":           ag.lidar_scan,
         })
 
     # Backward compat: primary robot = agent 0
@@ -1260,31 +1411,57 @@ def fetch_vector_map(lat: float = 38.900, lon: float = 22.433, radius: int = 150
         print(f"\n{C.OSM}[OSM] Map Request: lat={lat}, lon={lon}, radius={radius}, "
               f"agents={n_agents}, mode={mode}{C.END}")
 
-        if game_logic.geofence_pts and len(game_logic.geofence_pts) >= 3:
-            pts = [(p['lon'], p['lat']) for p in game_logic.geofence_pts]
+        # Snapshot geofence state once (thread-safe for parallel tasks)
+        geofence_snap = list(game_logic.geofence_pts)
+        used_poly = None
+        if geofence_snap and len(geofence_snap) >= 3:
+            pts = [(p['lon'], p['lat']) for p in geofence_snap]
             if pts[0] != pts[-1]:
                 pts.append(pts[0])
-            poly = ShapelyPolygon(pts)
-            # Use geofence bounding box to download graph
-            G_directed = ox.graph_from_polygon(poly, network_type='all')
-            print(f"{C.OSM}[OSM] Using Geofence Polygon for map download{C.END}")
-        else:
-            G_directed = ox.graph_from_point((lat, lon), dist=radius, network_type='all')
-            print(f"{C.OSM}[OSM] Using Point+Radius for map download{C.END}")
+            used_poly = ShapelyPolygon(pts)
+
+        def _fetch_graph():
+            if used_poly is not None:
+                print(f"{C.OSM}[OSM] Downloading road network (polygon)...{C.END}")
+                return ox.graph_from_polygon(used_poly, network_type='all')
+            print(f"{C.OSM}[OSM] Downloading road network (point+radius)...{C.END}")
+            return ox.graph_from_point((lat, lon), dist=radius, network_type='all')
+
+        def _fetch_buildings():
+            try:
+                if used_poly is not None:
+                    fn = getattr(ox, 'features_from_polygon',
+                                 getattr(ox, 'geometries_from_polygon', None))
+                    print(f"{C.OSM}[OSM] Downloading buildings (polygon)...{C.END}")
+                    return fn(used_poly, tags={"building": True}) if fn else None
+                fn = getattr(ox, 'features_from_point',
+                              getattr(ox, 'geometries_from_point', None))
+                print(f"{C.OSM}[OSM] Downloading buildings (point+radius)...{C.END}")
+                return fn((lat, lon), dist=radius, tags={"building": True}) if fn else None
+            except Exception as e:
+                print(f"{C.ERR}[OSM] Building download failed: {e}{C.END}")
+                return None
+
+        # Parallel download: road network + buildings simultaneously
+        print(f"{C.OSM}[OSM] Parallel OSM fetch started...{C.END}")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            f_graph = pool.submit(_fetch_graph)
+            f_bldgs = pool.submit(_fetch_buildings)
+            G_directed   = f_graph.result()
+            bldg_gdf_raw = f_bldgs.result()
+        print(f"{C.OSM}[OSM] Both downloads complete.{C.END}")
 
         G          = G_directed.to_undirected()
         largest_cc = max(nx.connected_components(G), key=len)
         G          = G.subgraph(largest_cc).copy()
         G_proj     = ox.project_graph(G)
 
-        # Apply geofence clip: remove nodes outside the polygon (optional)
-        if game_logic.geofence_poly is not None and len(game_logic.geofence_pts) >= 3:
-            # Project geofence points to UTM
-            if 'crs' in G_proj.graph:
-                inv_tf = Transformer.from_crs("epsg:4326", G_proj.graph['crs'], always_xy=True)
-                geofence_proj_pts = [inv_tf.transform(p['lon'], p['lat'])
-                                     for p in game_logic.geofence_pts]
-                game_logic.geofence_poly = ShapelyPolygon(geofence_proj_pts)
+        # Re-project geofence polygon to UTM so Shapely can enforce it
+        if used_poly is not None and 'crs' in G_proj.graph:
+            inv_tf = Transformer.from_crs("epsg:4326", G_proj.graph['crs'], always_xy=True)
+            geofence_proj_pts = [inv_tf.transform(p['lon'], p['lat'])
+                                 for p in geofence_snap]
+            game_logic.geofence_poly = ShapelyPolygon(geofence_proj_pts)
 
         for u, v, k, data in G_proj.edges(keys=True, data=True):
             hw   = data.get('highway', '')
@@ -1292,6 +1469,16 @@ def fetch_vector_map(lat: float = 38.900, lon: float = 22.433, radius: int = 150
             mult = HIGHWAY_MULTIPLIER.get(hw, 1.2)
             if mult != 1.0:
                 data['length'] = data.get('length', 1.0) * mult
+            # Physical road half-width for lateral agent positioning
+            w_m = HW_WIDTH_M.get(hw, 5.0)
+            try:
+                raw_w = data.get('width')
+                if raw_w:
+                    w_m = max(2.0, float(str(raw_w).replace('m', '').strip()))
+                elif data.get('lanes'):
+                    w_m = max(2.0, float(str(data['lanes']).strip()) * 3.2)
+            except: pass
+            data['half_width_m'] = w_m / 2.0
 
         nodes_gdf = ox.graph_to_gdfs(G_proj, edges=False)
         min_x, min_y, max_x, max_y = nodes_gdf.total_bounds
@@ -1323,64 +1510,77 @@ def fetch_vector_map(lat: float = 38.900, lon: float = 22.433, radius: int = 150
             "radius":      radius,
         })
         
-        # --- Extract 3D Buildings ---
+        # --- Process 3D Buildings (already downloaded in parallel above) ---
         try:
-            print(f"{C.OSM}[OSM] Fetching 3D building footprints...{C.END}")
-            if game_logic.geofence_pts and len(game_logic.geofence_pts) >= 3:
-                func = getattr(ox, 'features_from_polygon', getattr(ox, 'geometries_from_polygon', None))
-                bldg_gdf = func(poly, tags={"building": True}) if func else None
-            else:
-                func = getattr(ox, 'features_from_point', getattr(ox, 'geometries_from_point', None))
-                bldg_gdf = func((lat, lon), dist=radius, tags={"building": True}) if func else None
-
-            buildings_wgs = []
+            buildings_wgs  = []
             buildings_proj = []
+            bldg_gdf = bldg_gdf_raw
 
             if bldg_gdf is not None and not bldg_gdf.empty:
                 bldg_gdf = bldg_gdf[bldg_gdf.geometry.type.isin(['Polygon', 'MultiPolygon'])]
-                bldg_gdf_proj = bldg_gdf.to_crs(G_proj.graph['crs']) if 'crs' in G_proj.graph else ox.project_gdf(bldg_gdf)
+                bldg_gdf_proj = (bldg_gdf.to_crs(G_proj.graph['crs'])
+                                 if 'crs' in G_proj.graph else ox.project_gdf(bldg_gdf))
 
                 for idx, row in bldg_gdf.iterrows():
                     geom_wgs = row['geometry']
-                    height = 6.0
+                    # --- OSM height extraction (3.2 m/floor, default 9 m = ~3 floors) ---
+                    height = DEFAULT_BUILDING_HEIGHT_M
                     if 'height' in row and pd.notna(row['height']):
-                        try: height = float(str(row['height']).replace('m', '').replace(',', '.').strip())
+                        try:
+                            h_str = (str(row['height']).split(';')[0]
+                                     .replace("'", "").replace("m", "")
+                                     .replace(",", ".").strip())
+                            height = max(3.0, float(h_str))
                         except: pass
                     elif 'building:levels' in row and pd.notna(row['building:levels']):
-                        try: height = float(str(row['building:levels']).split(',')[0].strip()) * 3.0
+                        try:
+                            lvls = float(str(row['building:levels'])
+                                         .split(';')[0].split(',')[0].strip())
+                            height = max(3.0, lvls * FLOOR_HEIGHT_M)
+                            if 'roof:levels' in row and pd.notna(row['roof:levels']):
+                                try:
+                                    rl = float(str(row['roof:levels']).split(';')[0].strip())
+                                    height += rl * FLOOR_HEIGHT_M * 0.5
+                                except: pass
                         except: pass
 
-                    coords = []
+                    coords    = []
                     geom_type = geom_wgs.geom_type
                     if geom_type == 'Polygon':
                         coords = [list(geom_wgs.exterior.coords)]
                     elif geom_type == 'MultiPolygon':
                         coords = [list(g.exterior.coords) for g in geom_wgs.geoms]
-                    
+
                     if coords:
-                        buildings_wgs.append({"id": str(idx), "geometry": coords, "type": geom_type, "height_m": height})
+                        buildings_wgs.append({"id": str(idx), "geometry": coords,
+                                              "type": geom_type, "height_m": height})
 
                     geom_proj = bldg_gdf_proj.loc[idx, 'geometry']
                     if geom_proj.geom_type == 'Polygon':
-                        shifted = ShapelyPolygon([(x - center_x, y - center_y) for x, y in geom_proj.exterior.coords])
+                        shifted = ShapelyPolygon(
+                            [(x - center_x, y - center_y)
+                             for x, y in geom_proj.exterior.coords])
                         buildings_proj.append({"geometry": shifted, "height_m": height})
                     elif geom_proj.geom_type == 'MultiPolygon':
                         for g in geom_proj.geoms:
-                            shifted = ShapelyPolygon([(x - center_x, y - center_y) for x, y in g.exterior.coords])
+                            shifted = ShapelyPolygon(
+                                [(x - center_x, y - center_y)
+                                 for x, y in g.exterior.coords])
                             buildings_proj.append({"geometry": shifted, "height_m": height})
-                            
-            current_map_data["buildings_wgs"] = buildings_wgs
+
+            current_map_data["buildings_wgs"]  = buildings_wgs
             current_map_data["buildings_proj"] = buildings_proj
-            
-            # Build STRtree for fast Line-of-Sight raycasting
+
+            # STRtree for fast Line-of-Sight raycasting
             from shapely.strtree import STRtree
             geoms = [b["geometry"] for b in buildings_proj]
             current_map_data["bldg_tree"] = STRtree(geoms) if geoms else None
-            
-            print(f"{C.OSM}[OSM] Loaded {len(buildings_proj)} building footprints (indexed in STRtree).{C.END}")
+
+            print(f"{C.OSM}[OSM] {len(buildings_proj)} buildings loaded "
+                  f"(STRtree indexed).{C.END}")
         except Exception as e:
-            print(f"{C.ERR}[Error] Failed to fetch buildings: {e}{C.END}")
-            current_map_data["buildings_wgs"] = []
+            print(f"{C.ERR}[Error] Failed to process buildings: {e}{C.END}")
+            current_map_data["buildings_wgs"]  = []
             current_map_data["buildings_proj"] = []
             current_map_data["bldg_tree"] = None
 
@@ -1427,6 +1627,153 @@ def fetch_vector_map(lat: float = 38.900, lon: float = 22.433, radius: int = 150
 def get_current_map():
     return current_map_data["last_json_response"] or HTTPException(404, "No map")
 
+
+@app.get("/api/sim/scene")
+def get_scene_data():
+    """Return road network and building footprints for 3-D rendering (centred coords)."""
+    G   = current_map_data.get("G_proj")
+    cx  = current_map_data.get("center_x", 0.0)
+    cy  = current_map_data.get("center_y", 0.0)
+
+    HW_WIDTH = {
+        "motorway": 12, "motorway_link": 8, "trunk": 10, "trunk_link": 7,
+        "primary": 8, "primary_link": 6, "secondary": 7, "secondary_link": 5,
+        "tertiary": 6, "tertiary_link": 4, "unclassified": 5, "residential": 5,
+        "living_street": 4, "service": 3, "track": 3, "path": 2, "footway": 2,
+        "cycleway": 2, "steps": 2, "road": 5,
+    }
+    roads = []
+    if G:
+        seen: set = set()
+        for u, v, data in G.edges(data=True):
+            key = (min(u, v), max(u, v))
+            if key in seen:
+                continue
+            seen.add(key)
+            hw = data.get("highway", "road")
+            if isinstance(hw, list):
+                hw = hw[0]
+            # Extract actual width from OSM data when available
+            osm_width = None
+            try:
+                raw_w = data.get("width") or data.get("lanes")
+                if raw_w and str(raw_w).replace('.', '').isdigit():
+                    osm_width = float(str(raw_w))
+                    if data.get("lanes"):
+                        osm_width = osm_width * 3.5  # estimate metres per lane
+            except Exception:
+                pass
+            road_w = osm_width or HW_WIDTH.get(hw, 5)
+            # Use edge geometry if present, else straight segment
+            geom = data.get("geometry")
+            if geom is not None:
+                coords = list(geom.coords)
+                for i in range(len(coords) - 1):
+                    roads.append({
+                        "x1": round(coords[i][0] - cx, 1),
+                        "y1": round(coords[i][1] - cy, 1),
+                        "x2": round(coords[i+1][0] - cx, 1),
+                        "y2": round(coords[i+1][1] - cy, 1),
+                        "hw": hw, "w": road_w,
+                    })
+            else:
+                roads.append({
+                    "x1": round(G.nodes[u]["x"] - cx, 1),
+                    "y1": round(G.nodes[u]["y"] - cy, 1),
+                    "x2": round(G.nodes[v]["x"] - cx, 1),
+                    "y2": round(G.nodes[v]["y"] - cy, 1),
+                    "hw": hw, "w": road_w,
+                })
+
+    buildings = []
+    for b in current_map_data.get("buildings_proj", [])[:300]:
+        g = b.get("geometry")
+        if g is None:
+            continue
+        geom_type = g.geom_type
+        polys = [g] if geom_type == "Polygon" else list(g.geoms) if geom_type == "MultiPolygon" else []
+        for poly in polys:
+            if poly.is_empty:
+                continue
+            buildings.append({
+                "coords": [{"x": round(c[0], 1), "y": round(c[1], 1)}
+                            for c in list(poly.exterior.coords)],
+                "h": b.get("height_m", 10),
+            })
+
+    return {"roads": roads, "buildings": buildings, "cx": cx, "cy": cy}
+
+
+@app.get("/api/map/buildings")
+def get_buildings():
+    """Return building footprints in WGS84 for 3D rendering in the frontend."""
+    bldgs = current_map_data.get("buildings_wgs")
+    if not bldgs:
+        return {"buildings": []}
+    features = []
+    for i, b in enumerate(bldgs):
+        geom = b.get("geometry")
+        if not geom:
+            continue
+        try:
+            # geom is already a list of coordinate rings: [[[lon, lat], ...]]
+            # We just need to ensure the format is valid and add it
+            features.append({
+                "id": b.get("id", str(i)),
+                "coordinates": geom,
+                "type": b.get("type", "Polygon"),
+                "height_m": b.get("height_m", 8.0),
+            })
+        except Exception as e:
+            print(f"Error parsing building {i}: {e}")
+            continue
+    return {"buildings": features}
+
+
+@app.get("/api/sim/costmap")
+def get_costmap():
+    """Return node-level risk costs for heatmap overlay. Uses the penalized graph."""
+    G = current_map_data.get("G_proj")
+    if G is None or not game_logic or not game_logic.enemies:
+        return {"points": []}
+    cx = current_map_data.get("center_x", 0.0)
+    cy = current_map_data.get("center_y", 0.0)
+    transformer = current_map_data.get("transformer")
+    if transformer is None:
+        return {"points": []}
+
+    try:
+        U_pen = build_penalized_graph(G, game_logic.enemies, cx=cx, cy=cy)
+    except Exception:
+        return {"points": []}
+
+    # Collect node costs (sum of incident edge penalties)
+    node_costs = {}
+    for u, v, data in U_pen.edges(data=True):
+        cost = data.get('length', 0)
+        node_costs[u] = node_costs.get(u, 0) + cost
+        node_costs[v] = node_costs.get(v, 0) + cost
+
+    if not node_costs:
+        return {"points": []}
+
+    max_cost = max(node_costs.values())
+    min_cost = min(node_costs.values())
+    cost_range = max_cost - min_cost if max_cost > min_cost else 1.0
+
+    points = []
+    for node, cost in node_costs.items():
+        intensity = (cost - min_cost) / cost_range
+        if intensity < 0.05:
+            continue  # Skip low-risk nodes to reduce payload
+        nx, ny = G.nodes[node]['x'], G.nodes[node]['y']
+        try:
+            lon, lat = transformer.transform(nx, ny)
+            points.append([round(lat, 6), round(lon, 6), round(intensity, 3)])
+        except Exception:
+            continue
+
+    return {"points": points}
 
 @app.post("/api/path/vector")
 def get_vector_path(req: VectorPathRequest):
@@ -1574,13 +1921,14 @@ def sim_pause():
 
 @app.post("/api/sim/stop")
 def sim_stop():
-    """Completely stop the mission (triggers game_over)."""
+    """Completely stop the mission. Does NOT record to mission history."""
     with _sim_lock:
         game_logic.sim_running    = False
         game_logic.sim_paused     = False
         game_logic.game_over      = True
+        game_logic.stats_saved    = True   # skip history recording for manual stops
         game_logic.status_message = "MISSION STOPPED"
-    print(f"{C.WARN}[SIM] Mission STOPPED by user{C.END}")
+    print(f"{C.WARN}[SIM] Mission STOPPED by user (not recorded to history){C.END}")
     return {"status": "stopped"}
 
 
@@ -1655,13 +2003,9 @@ def sim_state():
 
 
 
-class SpeedRequest(BaseModel):
-    multiplier: float = 1.0
-
-
 @app.post("/api/sim/speed")
 def set_sim_speed(req: SpeedRequest):
-    """Set simulation speed multiplier (0.25 – 50×). Affects robot speed, elapsed time, and enemy movement."""
+    """Set simulation speed multiplier (0.25 - 50×). Affects robot speed, elapsed time, and enemy movement."""
     global sim_speed_multiplier
     sim_speed_multiplier = max(0.25, min(50.0, req.multiplier))
     print(f"{C.WARN}[SIM] Speed set to {sim_speed_multiplier}×{C.END}")
@@ -1708,12 +2052,6 @@ def get_stats():
 # EDITOR ENDPOINTS
 # ---------------------------------------------------------------------------
 
-class PlacementRequest(BaseModel):
-    type: str   # 'agent' | 'target' | 'patrol' | 'aggressive'
-    lat: float
-    lon: float
-
-
 @app.post("/api/editor/place")
 def editor_place(req: PlacementRequest):
     editor_state.append({"type": req.type, "lat": req.lat, "lon": req.lon})
@@ -1742,11 +2080,6 @@ def get_editor_state():
 # ---------------------------------------------------------------------------
 # SCENARIO SAVE / LOAD
 # ---------------------------------------------------------------------------
-
-class ScenarioSaveRequest(BaseModel):
-    name: str
-    params: dict = {}
-
 
 @app.post("/api/scenario/save")
 def scenario_save(req: ScenarioSaveRequest):
@@ -1943,7 +2276,7 @@ def set_geofence(req: GeofencePolygon):
 
 @app.delete("/api/sim/geofence")
 def clear_geofence():
-    """Remove the geofence polygon — agents are free to move anywhere."""
+    """Remove the geofence polygon - agents are free to move anywhere."""
     game_logic.geofence_poly = None
     game_logic.geofence_pts  = []
     print(f"{C.WARN}[GEOFENCE] Cleared{C.END}")

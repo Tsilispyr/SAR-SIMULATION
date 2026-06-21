@@ -14,9 +14,9 @@ _This paper presents SAR-UGV Simulation, a fully browser-controllable multi-agen
 
 Urban search and rescue (SAR) operations present some of the most complex challenges in autonomous robotics: navigating unknown terrain, evading dynamic threats, coordinating across multiple agents, and collecting dispersed targets under time pressure. Simulation platforms that faithfully model real-world street topology are valuable tools for testing AI policies before deployment on physical hardware.
 
-SAR-UGV Simulation addresses this need by deploying autonomous agents on genuine OpenStreetMap (OSM) street graphs for any city on Earth. Unlike synthetic grid-based environments, OSM graphs encode real intersections, one-way streets, road classifications, and path types — providing navigational realism that is otherwise expensive to author by hand.
+SAR-UGV Simulation addresses this need by deploying autonomous agents on genuine OpenStreetMap (OSM) street graphs for any city on Earth. Unlike synthetic grid-based environments, OSM graphs encode real intersections, one-way streets, road classifications, and path types - providing navigational realism that is otherwise expensive to author by hand.
 
-The platform evolves a prior Pygame prototype (SARGV-FIN-CC.py) into a production-grade web application. The original prototype proved the core AI pipeline — risk-weighted A\* pathfinding, escape mode decision logic, terrain scoring — but was limited to a single agent on a synthetic map and required local Python installation. Version 12.0 eliminates all of these constraints.
+The platform evolves a prior Pygame prototype (SARGV-FIN-CC.py) into a production-grade web application. The original prototype proved the core AI pipeline - risk-weighted A\* pathfinding, escape mode decision logic, terrain scoring - but was limited to a single agent on a synthetic map and required local Python installation. Version 12.0 eliminates all of these constraints.
 
 ## 1.1 Design Philosophy
 
@@ -34,8 +34,8 @@ The platform consists of two Docker containers orchestrated by docker-compose, c
 
 |     |     |
 | --- | --- |
-| **Docker Compose — System Overview** |     |
-| **Backend :8000**<br><br>FastAPI + Uvicorn (Python 3.10)<br><br>osmnx / networkx / pyproj<br><br>AI Logic \| Game State \| Scoring<br><br>/app/data/stats/<br><br>/app/data/scenarios/<br><br>/app/data/osmnx_cache/ | **Frontend :8085**<br><br>nginx (static file server)<br><br>index.html — Mission Planner<br><br>mission.html — Live Monitor<br><br>stats.html — Analytics<br><br>editor.html — Scenario Editor<br><br>Leaflet.js \| Chart.js |
+| **Docker Compose - System Overview** |     |
+| **Backend :8000**<br><br>FastAPI + Uvicorn (Python 3.10)<br><br>osmnx / networkx / pyproj<br><br>AI Logic \| Game State \| Scoring<br><br>/app/data/stats/<br><br>/app/data/scenarios/<br><br>/app/data/osmnx_cache/ | **Frontend :8085**<br><br>nginx (static file server)<br><br>index.html - Mission Planner<br><br>mission.html - Live Monitor<br><br>stats.html - Analytics<br><br>editor.html - Scenario Editor<br><br>Leaflet.js \| Chart.js |
 | ← REST / JSON polling (200ms position \| 1s stats) → |     |
 
 Figure Docker Compose architecture showing backend AI server and static frontend communicating over REST/JSON.
@@ -50,7 +50,7 @@ The backend is a FastAPI application running on Uvicorn. Table 1 summarises the 
 | **FastAPI** | REST API framework | Async-native, minimal boilerplate, auto OpenAPI docs at /docs |
 | **Uvicorn** | ASGI server | Lightweight production server; pairs natively with FastAPI |
 | **osmnx** | OSM graph download & projection | Turnkey real-world street topology; no manual map authoring required |
-| **networkx** | Graph algorithms | A\*, BFS, reachability — battle-tested, extensive documentation |
+| **networkx** | Graph algorithms | A\*, BFS, reachability - battle-tested, extensive documentation |
 | **pyproj** | CRS transforms | Converts projected (metre) coordinates to WGS-84 lat/lon for Leaflet rendering |
 
 Table Backend technology stack with selection rationale.
@@ -64,7 +64,7 @@ The frontend uses no build pipeline. Three vanilla HTML files and one scenario e
 | **Library** | **Role** |
 | **Leaflet.js** | Interactive geographic map used in both mission.html (live tracking) and index.html (mission planning) |
 | **Chart.js** | Live-updating line charts for score over time, doughnut chart for mission history, bar chart for escape events |
-| **Orbitron / Share Tech Mono** | Google Fonts — military-aesthetic typography matching the operational domain of the simulation |
+| **Orbitron / Share Tech Mono** | Google Fonts - military-aesthetic typography matching the operational domain of the simulation |
 
 Table Frontend library stack.
 
@@ -79,14 +79,14 @@ When an operator presses Deploy Mission, the backend executes the following pipe
 1.  Download the OSM street graph for the requested area via osmnx.graph_from_point with the operator-specified radius.
 2.  Project the graph from WGS-84 to local Euclidean metres using pyproj (UTM zone auto-detected from centre coordinates).
 3.  Identify dead-end nodes via compute_dead_ends: any node with graph degree ≤ 1 is a cul-de-sac.
-4.  Spawn all entities — either randomly or from custom editor placements when mode=custom.
+4.  Spawn all entities - either randomly or from custom editor placements when mode=custom.
 5.  Return road geometry as GeoJSON for the Leaflet road overlay.
 
 The projected graph is retained in memory for the entire session. Subsequent restarts reuse the spawn snapshot without re-downloading from OSM, which eliminates round-trip latency and respects OSM rate limits.
 
 ## 3.2 Risk-Weighted Graph Construction
 
-At every replan cycle the backend calls build_penalized_graph to construct an augmented copy of the street graph with enemy threat encoded directly into edge weights. This single function replaces what would otherwise be a complex set of explicit avoidance rules — the cost function does all the work.
+At every replan cycle the backend calls build_penalized_graph to construct an augmented copy of the street graph with enemy threat encoded directly into edge weights. This single function replaces what would otherwise be a complex set of explicit avoidance rules - the cost function does all the work.
 
 ### 3.2.1 Terrain Cost Multipliers
 
@@ -95,11 +95,11 @@ Every edge weight is multiplied by a highway-type-specific factor (HIGHWAY_MULTI
 |     |     |     |
 | --- | --- | --- |
 | **Road Type** | **Cost Multiplier** | **Notes** |
-| motorway / trunk | 0.80 – 0.85× | Fast arterials; agent moves quickly but exposure risk if patrolled |
+| motorway / trunk | 0.80 - 0.85× | Fast arterials; agent moves quickly but exposure risk if patrolled |
 | primary / secondary | 1.00× | Baseline cost; standard urban roads |
-| tertiary / unclassified | 1.30 – 1.40× | Minor roads; slightly higher traversal penalty |
-| residential / living street | 1.50 – 2.00× | Slow, narrow; agent preference discouraged |
-| track / path / footway / steps | 2.50 – 4.00× | Hazard terrain; highest multiplier |
+| tertiary / unclassified | 1.30 - 1.40× | Minor roads; slightly higher traversal penalty |
+| residential / living street | 1.50 - 2.00× | Slow, narrow; agent preference discouraged |
+| track / path / footway / steps | 2.50 - 4.00× | Hazard terrain; highest multiplier |
 
 Table HIGHWAY_MULTIPLIER values by road classification
 
@@ -110,11 +110,11 @@ For each enemy, the algorithm applies tiered additive penalties to all edges wit
 |     |     |     |
 | --- | --- | --- |
 | **Distance from Enemy** | **Penalty Added** | **Interpretation** |
-| 0 m (exact position) | +8,000 | Absolute avoidance — effectively impassable |
+| 0 m (exact position) | +8,000 | Absolute avoidance - effectively impassable |
 | < 10 m | +3,000 | Extreme danger zone; near-certain contact |
 | < 30 m | +1,500 | High danger; within direct observation range |
-| < detection_radius | +800 | Inside detection bubble — enemy will switch to chase |
-| < detection_radius + 30 m | +300 | Outer influence ring — cautionary buffer |
+| < detection_radius | +800 | Inside detection bubble - enemy will switch to chase |
+| < detection_radius + 30 m | +300 | Outer influence ring - cautionary buffer |
 | Beyond outer ring | +0  | No penalty; normal graph cost applies |
 
 Table Enemy proximity penalty tiers applied during graph construction.
@@ -135,9 +135,9 @@ Each simulation tick, every active agent evaluates the following decision tree i
 
 ├─ YES → brave check: can I reach nearest target before enemy reaches me?
 
-│ ├─ YES → pursue target ("brave" mode — accept the risk)
+│ ├─ YES → pursue target ("brave" mode - accept the risk)
 
-│ └─ NO → escape mode — BFS ring of candidate nodes + A\* to best
+│ └─ NO → escape mode - BFS ring of candidate nodes + A\* to best
 
 └─ NO → pursue assigned target (or replan if target already collected)
 
@@ -147,7 +147,7 @@ The brave check compares the A\* path length to the nearest uncollected target a
 
 ## 3.4 Escape Pathfinding
 
-When escape mode is triggered, the agent does not flee in a straight line. Instead, it evaluates a ring of candidate nodes 2–8 graph hops away and scores each candidate as:
+When escape mode is triggered, the agent does not flee in a straight line. Instead, it evaluates a ring of candidate nodes 2-8 graph hops away and scores each candidate as:
 
 **score = enemy_turns_away − path_length / 4**
 
@@ -197,9 +197,9 @@ Each tick performs the following operations in sequence:
 
 ## 4.2 Speed Multiplier
 
-The sim_speed_multiplier (range 0.25× – 100×) scales the effective simulation timestep. At 100× the effective delta-time per tick is 20 seconds of game-time, allowing missions to complete in seconds of real time. This is useful for rapid batch evaluation of different strategies.
+The sim_speed_multiplier (range 0.25× - 100×) scales the effective simulation timestep. At 100× the effective delta-time per tick is 20 seconds of game-time, allowing missions to complete in seconds of real time. This is useful for rapid batch evaluation of different strategies.
 
-The multiplier is applied by scaling effective_dt rather than changing the actual tick rate. This preserves the 5 Hz polling contract with the frontend — position and stats endpoints always return fresh data every 200ms regardless of simulation speed.
+The multiplier is applied by scaling effective_dt rather than changing the actual tick rate. This preserves the 5 Hz polling contract with the frontend - position and stats endpoints always return fresh data every 200ms regardless of simulation speed.
 
 ## 4.3 Path Densification
 
@@ -207,7 +207,7 @@ Agent paths returned from A\* are sequences of OSM graph node coordinates. These
 
 ## 4.4 Spawn Snapshot and Restart
 
-After spawning, the backend saves a \_spawn_snapshot of all entity positions and configurations. The /api/sim/restart endpoint restores this snapshot without re-downloading the OSM graph or re-running the spawn algorithm. This allows operators to replay the same starting configuration multiple times — essential for comparative evaluation of parameter changes.
+After spawning, the backend saves a \_spawn_snapshot of all entity positions and configurations. The /api/sim/restart endpoint restores this snapshot without re-downloading the OSM graph or re-running the spawn algorithm. This allows operators to replay the same starting configuration multiple times - essential for comparative evaluation of parameter changes.
 
 # 5\. Scoring Model
 
@@ -226,10 +226,10 @@ Figure Mission scoring formula.
 |     |     |     |
 | --- | --- | --- |
 | **Road Type** | **Terrain Penalty** | **Effect on Score** |
-| Motorway / trunk | 0 per segment | No penalty — arterials are score-efficient |
-| Primary / secondary | 0 per segment | No penalty — standard urban roads |
-| Tertiary / residential / service | −1 per segment | Minor penalty — DIFFICULT class |
-| Track / path / footway / cycleway | −3 per segment | Significant penalty — HAZARD class |
+| Motorway / trunk | 0 per segment | No penalty - arterials are score-efficient |
+| Primary / secondary | 0 per segment | No penalty - standard urban roads |
+| Tertiary / residential / service | −1 per segment | Minor penalty - DIFFICULT class |
+| Track / path / footway / cycleway | −3 per segment | Significant penalty - HAZARD class |
 
 Table Terrain scoring penalties by road classification (HIGHWAY_SCORE_PENALTY).
 
@@ -296,23 +296,23 @@ The backend exposes 18 endpoints across five functional groups. All endpoints re
 | /api/scenario/list | GET | List all saved scenario files in scenarios/ |
 | /api/scenario/delete | DELETE | Delete a named scenario file |
 
-_Tables 8–11. Complete REST API reference grouped by functional area._
+_Tables 8-11. Complete REST API reference grouped by functional area._
 
 # 7\. Frontend Pages
 
 The frontend consists of four purpose-built HTML pages, each polling a distinct subset of the API. All pages share a dark military aesthetic using Orbitron for headings and Share Tech Mono for data readouts.
 
-## 7.1 index.html — Mission Planner
+## 7.1 index.html - Mission Planner
 
 The mission planner is the entry point for operators. It provides:
 
 - Interactive Leaflet map for selecting mission centre by click or manual coordinate entry.
-- Visual radius drawing — a draggable circle shows the mission area as the operator adjusts the slider.
-- Parameter configuration panel: mission radius (100–2000 m), number of targets, patrol enemy count and speed, aggressive enemy count and speed, number of agents (1–4), agent speed, and detection radius.
-- Deploy Mission button — sends all parameters to /api/map/vector and redirects to mission.html.
-- Deploy Custom Mission button — uses editor placements via mode=custom.
+- Visual radius drawing - a draggable circle shows the mission area as the operator adjusts the slider.
+- Parameter configuration panel: mission radius (100-2000 m), number of targets, patrol enemy count and speed, aggressive enemy count and speed, number of agents (1-4), agent speed, and detection radius.
+- Deploy Mission button - sends all parameters to /api/map/vector and redirects to mission.html.
+- Deploy Custom Mission button - uses editor placements via mode=custom.
 
-## 7.2 mission.html — Live Mission Monitor
+## 7.2 mission.html - Live Mission Monitor
 
 The live mission view is the operational centre of the platform. It polls /api/robot/position at 200ms and /api/stats at 1s, updating all UI elements in real time:
 
@@ -321,27 +321,27 @@ The live mission view is the operational centre of the platform. It polls /api/r
 - Live score chart (Chart.js) plotting total and per-agent score over elapsed time.
 - Targets remaining chart showing collection progress as a line over time.
 - Escape events bar chart showing frequency of escape mode activations per agent.
-- AI Decision Log — colour-coded live-appended entries indicating agent decision type at each tick.
+- AI Decision Log - colour-coded live-appended entries indicating agent decision type at each tick.
 - Live mini-map (280×200 px Leaflet widget) in the top-right corner showing all entities in dark style.
 - Mission controls: Start, Pause, Stop, Restart, and Speed multiplier slider.
 
-## 7.3 stats.html — Analytics Dashboard
+## 7.3 stats.html - Analytics Dashboard
 
 The analytics dashboard loads historical mission data from /api/stats/summary and /api/stats/history to provide aggregate performance insight:
 
-- Mission History panel — doughnut chart of success/partial/failed outcomes; best and average score across all missions.
+- Mission History panel - doughnut chart of success/partial/failed outcomes; best and average score across all missions.
 - Recent missions list with per-mission agent-count badge, final score, and outcome label.
 - Per-agent-count breakdown table: columns for 1-agent, 2-agent, 3-agent, and 4-agent runs showing win rate, average score, and mission count.
-- Score Formula panel — collapsible explanation of scoring rules with terrain penalty table.
+- Score Formula panel - collapsible explanation of scoring rules with terrain penalty table.
 
-## 7.4 editor.html — Scenario Map Editor
+## 7.4 editor.html - Scenario Map Editor
 
 The scenario editor allows operators to design custom missions by placing entities directly on the Leaflet map:
 
 - Tool palette: Agent / Target / Patrol Enemy / Aggressive Enemy / Clear.
-- Click-to-place interaction — entities snap to the nearest OSM graph node via the backend's nearest_nodes lookup.
+- Click-to-place interaction - entities snap to the nearest OSM graph node via the backend's nearest_nodes lookup.
 - Save / Load / Delete controls for persisting scenarios as named JSON files.
-- Deploy Custom Mission button — sends current placements to the backend and redirects to mission.html with mode=custom.
+- Deploy Custom Mission button - sends current placements to the backend and redirects to mission.html with mode=custom.
 
 # 8\. Deployment
 
@@ -371,15 +371,15 @@ pip install -r requirements.txt
 
 **uvicorn src.main:app --reload --host 0.0.0.0 --port 8000**
 
-Figure Backend-only development mode — open HTML files directly via file://.
+Figure Backend-only development mode - open HTML files directly via file://.
 
 ## 8.3 Data Directory Lifecycle
 
 The three data directories under Backend/data/ are not tracked in Git and are created automatically by the backend at first run:
 
-- data/stats/ — one JSON file per completed mission, used by the analytics dashboard.
-- data/scenarios/ — one JSON file per saved scenario from the editor.
-- data/osmnx_cache/ — cached OSM graph downloads; eliminates repeated network requests for the same area.
+- data/stats/ - one JSON file per completed mission, used by the analytics dashboard.
+- data/scenarios/ - one JSON file per saved scenario from the editor.
+- data/osmnx_cache/ - cached OSM graph downloads; eliminates repeated network requests for the same area.
 
 No manual directory creation is required. Docker volume mounts ensure data persists across container restarts.
 
@@ -391,13 +391,13 @@ This section documents the key architectural and algorithmic decisions with the 
 
 The frontend polls at 200ms (position) and 1s (stats). WebSockets would provide lower latency push delivery, but the cost-benefit analysis does not favour them at this update rate.
 
-At 6 m/s agent speed on a 2-metre waypoint grid, a position update every 200ms means agents move approximately 1.2 metres between frames — well within the resolution of the rendered map markers. WebSockets would add connection lifecycle complexity (reconnect logic, keepalive, error recovery) with negligible UX improvement. Polling also makes the API trivially debuggable: any endpoint can be tested with curl.
+At 6 m/s agent speed on a 2-metre waypoint grid, a position update every 200ms means agents move approximately 1.2 metres between frames - well within the resolution of the rendered map markers. WebSockets would add connection lifecycle complexity (reconnect logic, keepalive, error recovery) with negligible UX improvement. Polling also makes the API trivially debuggable: any endpoint can be tested with curl.
 
 ## 9.2 osmnx over a Custom Map
 
-Real street topology is free, accurate, and covers every city on Earth. The original Pygame prototype used a synthetic grid that required manual authoring and had no geographic fidelity — agents navigated a grid that bore no resemblance to actual urban structure. osmnx gives navigational realism at zero authoring cost.
+Real street topology is free, accurate, and covers every city on Earth. The original Pygame prototype used a synthetic grid that required manual authoring and had no geographic fidelity - agents navigated a grid that bore no resemblance to actual urban structure. osmnx gives navigational realism at zero authoring cost.
 
-The trade-off is that osmnx requires GEOS, PROJ, and GDAL native libraries — painful to install manually. Docker eliminates this problem entirely. The one-command deployment model makes the native library dependency irrelevant to end users.
+The trade-off is that osmnx requires GEOS, PROJ, and GDAL native libraries - painful to install manually. Docker eliminates this problem entirely. The one-command deployment model makes the native library dependency irrelevant to end users.
 
 ## 9.3 Dead-End Avoidance via BFS
 
@@ -407,7 +407,7 @@ This avoidance was empirically validated: test runs without the penalty showed f
 
 ## 9.4 Greedy vs Optimal Target Assignment
 
-Random assignment leads to agent clustering. Optimal assignment via the Hungarian algorithm (O(n³)) is feasible at this scale but unnecessary. Distance-greedy assignment (O(n²)) achieves the primary goal — spatial separation — with simpler code and no dependency on a linear assignment solver.
+Random assignment leads to agent clustering. Optimal assignment via the Hungarian algorithm (O(n³)) is feasible at this scale but unnecessary. Distance-greedy assignment (O(n²)) achieves the primary goal - spatial separation - with simpler code and no dependency on a linear assignment solver.
 
 The greedy approach does produce suboptimal assignments in some cases (e.g., two agents close together with targets distributed non-uniformly), but the error is bounded by the spatial distribution of the targets and is not exploitable by any adversary in the simulation.
 
@@ -417,7 +417,7 @@ The scenario set is small: tens of files, each under 5 KB. A flat JSON file per 
 
 ## 9.6 Vanilla HTML over a JavaScript Framework
 
-The explicit avoidance of React, Vue, Angular, or any equivalent framework was a deliberate choice. The entire frontend is auditable as written: no transpilation, no source maps, no build artefacts. Any team member with browser DevTools can read and understand the full rendering logic. The Dockerfile for the frontend is one line. This is an academic simulation tool, not a production SaaS product — auditability trumps abstraction.
+The explicit avoidance of React, Vue, Angular, or any equivalent framework was a deliberate choice. The entire frontend is auditable as written: no transpilation, no source maps, no build artefacts. Any team member with browser DevTools can read and understand the full rendering logic. The Dockerfile for the frontend is one line. This is an academic simulation tool, not a production SaaS product - auditability trumps abstraction.
 
 # 10\. Future Work
 
@@ -426,9 +426,9 @@ The current implementation is functionally complete as a simulation and demonstr
 |     |     |     |     |
 | --- | --- | --- | --- |
 | **Priority** | **Feature** | **Effort** | **Backend Changes** |
-| **High** | Post-mission freeze / final report view | Small–Medium | None |
+| **High** | Post-mission freeze / final report view | Small-Medium | None |
 | **High** | Terrain tile overlay (road cost visualisation) | Small | GeoJSON extension |
-| **High** | Unit and integration test suite | Medium–Large | New tests only |
+| **High** | Unit and integration test suite | Medium-Large | New tests only |
 | **Medium** | Risk heatmap overlay (Leaflet.heat) | Medium | New /api/sim/costmap |
 | **Medium** | Pause-aware elapsed time accuracy | Tiny | 2 lines in game state |
 | **Low** | Agent blackboard / explicit coordination | Large | New shared state object |
@@ -438,7 +438,7 @@ _Table 12. Future work priority matrix._
 
 ## 10.1 Risk Heatmap Overlay
 
-The build_penalized_graph function already computes per-node threat levels at every replan cycle. Exposing this data via a /api/sim/costmap endpoint and rendering it with the Leaflet.heat plugin would give operators immediate visual insight into why agents choose specific routes. The colour ramp (blue → yellow → red) maps normalised cost to threat intensity. The heatmap would update every 3–5 seconds, substantially lower priority than position polling.
+The build_penalized_graph function already computes per-node threat levels at every replan cycle. Exposing this data via a /api/sim/costmap endpoint and rendering it with the Leaflet.heat plugin would give operators immediate visual insight into why agents choose specific routes. The colour ramp (blue → yellow → red) maps normalised cost to threat intensity. The heatmap would update every 3-5 seconds, substantially lower priority than position polling.
 
 ## 10.2 Post-Mission Freeze and Export
 
@@ -446,7 +446,7 @@ When game_over is detected by the frontend, all polling timers should stop and a
 
 ## 10.3 Agent Blackboard Coordination
 
-The current implicit coordination (shared target list) is effective but limited. A shared blackboard dictionary would enable agents to declare intended targets, share position data, and build a collective threat model. The primary implementation challenge is avoiding race conditions between agent ticks — agents must read the blackboard at the start of their tick and write at the end, with tick serialisation ensuring consistency.
+The current implicit coordination (shared target list) is effective but limited. A shared blackboard dictionary would enable agents to declare intended targets, share position data, and build a collective threat model. The primary implementation challenge is avoiding race conditions between agent ticks - agents must read the blackboard at the start of their tick and write at the end, with tick serialisation ensuring consistency.
 
 ## 10.4 Godot / ROS Integration
 
@@ -505,6 +505,6 @@ SAR-UGV Simulation delivers a production-quality multi-agent search and rescue p
 - **A zero-framework frontend architecture deployable by a single Docker command with no build pipeline.**
 - **Persistent scenario and mission statistics storage enabling longitudinal performance analysis.**
 
-The platform is immediately usable for academic comparison of navigation strategies, multi-agent coordination policies, and enemy avoidance algorithms across arbitrary real-world urban environments. The identified future work — risk heatmap visualisation, post-mission reporting, explicit agent blackboard coordination, and Godot/ROS integration — will progressively elevate the platform from a functional simulation to a full research testbed suitable for algorithm publication.
+The platform is immediately usable for academic comparison of navigation strategies, multi-agent coordination policies, and enemy avoidance algorithms across arbitrary real-world urban environments. The identified future work - risk heatmap visualisation, post-mission reporting, explicit agent blackboard coordination, and Godot/ROS integration - will progressively elevate the platform from a functional simulation to a full research testbed suitable for algorithm publication.
 
-_— End of Document —_
+_- End of Document -_

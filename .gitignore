@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# Runtime data (auto-created on first run)
+Backend/data/stats/
+Backend/data/scenarios/
+Backend/data/osmnx_cache/
+
+# Docker
+.docker/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# Folders not tracked in git
+AI_Recovery/
+datasets/
+DRONE/
+photos/
+
+# Root files not tracked in this repo
+DEV_PLAN.md
+implementation_plan.md
+README-SAR.md
+HRF-Poster-Template(1).pptx
+
+# Batch test outputs (added after evaluation runs complete)
+batch_results.json
+batch_results.csv
+SAR_Report_GR.md
+results_pie.png
+results_by_difficulty.png
+results_score_dist.png
+results_rate_vs_difficulty.png

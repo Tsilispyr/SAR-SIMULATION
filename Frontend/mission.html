@@ -20,22 +20,23 @@
         }
 
         :root {
-            --bg: #0f1117;
-            --surface: rgba(109, 133, 153, 0.93);
-            --border: rgba(109, 133, 153, 0.93);
+            --bg: #1b1f24;
+            --surface: rgba(37, 42, 52, .96);
+            --border: rgba(55, 65, 80, .85);
             --accent: #b3ca30;
-            --green: #19a725;
-            --yellow: #d3bf0d;
-            --red: #b60909;
-            --purple: #801ddd;
-            --text: #0a3005;
-            --muted: #350000;
+            --green: #4da55e;
+            --yellow: #c9a32e;
+            --red: #b84444;
+            --purple: #7a50c0;
+            --text: #c4cad6;
+            --muted: #7a8496;
         }
 
         body {
             background: var(--bg);
-            font-family: 'Share Tech Mono', monospace;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
             overflow: hidden;
+            color: var(--text);
         }
 
         #map {
@@ -47,221 +48,143 @@
         /* --- TOP BAR --- */
         #topbar {
             position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 48px;
+            top: 0; left: 0; right: 0;
+            height: 44px;
             background: var(--surface);
             border-bottom: 1px solid var(--border);
             display: flex;
             align-items: center;
-            gap: 10px;
-            padding: 0 14px;
+            gap: 6px;
+            padding: 0 12px;
             z-index: 1000;
-            backdrop-filter: blur(8px);
-            font-family: 'Share Tech Mono', monospace;
         }
 
         #topbar h1 {
-            font-size: 13px;
+            font-size: 11px;
             font-weight: 700;
             color: var(--accent);
             white-space: nowrap;
             font-family: 'Orbitron', sans-serif;
             text-transform: uppercase;
             letter-spacing: 2px;
+            margin-right: 4px;
         }
 
-        .top-sep {
-            flex: 1;
-        }
+        .top-sep { flex: 1; }
 
         .top-btn {
             font-size: 12px;
-            font-weight: 600;
-            padding: 5px 10px;
-            border-radius: 6px;
+            padding: 4px 10px;
+            border-radius: 3px;
             border: 1px solid var(--border);
-            background: rgba(255, 255, 255, .06);
+            background: linear-gradient(to bottom, #353c48, #2c3340);
             color: var(--text);
             cursor: pointer;
             text-decoration: none;
-            transition: .2s;
+            transition: .15s;
+            white-space: nowrap;
         }
 
-        .top-btn:hover {
-            background: rgba(255, 255, 255, .12);
-        }
+        .top-btn:hover { background: linear-gradient(to bottom, #3f4858, #353c4a); border-color: #5a6278; }
 
         /* Speed buttons */
         .speed-btn {
             font-size: 11px;
-            font-weight: 700;
-            padding: 3px 8px;
-            border-radius: 5px;
+            font-weight: 600;
+            padding: 3px 7px;
+            border-radius: 3px;
             border: 1px solid var(--border);
-            background: rgba(255, 255, 255, .06);
+            background: rgba(255,255,255,.04);
             color: var(--muted);
             cursor: pointer;
-            transition: .2s;
+            transition: .15s;
         }
 
-        .speed-btn:hover {
-            color: var(--text);
-            background: rgba(255, 255, 255, .12);
-        }
+        .speed-btn:hover { color: var(--text); background: rgba(255,255,255,.09); }
+        .speed-btn.active { background: var(--accent); border-color: var(--accent); color: #1b1f24; font-weight: 700; }
 
-        .speed-btn.active {
-            background: var(--accent);
-            border-color: var(--accent);
-            color: #fff;
-        }
-
-        #speed-label {
-            font-size: 11px;
-            color: var(--muted);
-            white-space: nowrap;
-        }
+        #speed-label { font-size: 11px; color: var(--muted); white-space: nowrap; }
 
         /* Status pill */
         #status-pill {
             font-size: 11px;
-            font-weight: 700;
-            padding: 3px 12px;
-            border-radius: 20px;
+            font-weight: 600;
+            padding: 3px 10px;
+            border-radius: 3px;
             border: 1px solid var(--border);
             color: var(--muted);
-            background: rgba(255, 255, 255, .05);
-            transition: .3s;
+            background: rgba(255,255,255,.04);
+            transition: .25s;
             white-space: nowrap;
         }
 
-        #status-pill.safe {
-            border-color: var(--green);
-            color: var(--green);
-        }
-
-        #status-pill.warn {
-            border-color: var(--yellow);
-            color: var(--yellow);
-        }
-
-        #status-pill.danger {
-            border-color: var(--red);
-            color: var(--red);
-        }
-
-        #status-pill.success {
-            border-color: var(--green);
-            color: var(--green);
-        }
-
-        #status-pill.partial {
-            border-color: var(--yellow);
-            color: var(--yellow);
-        }
+        #status-pill.safe    { border-color: var(--green);  color: #6ac87c; }
+        #status-pill.warn    { border-color: var(--yellow); color: #d0aa40; }
+        #status-pill.danger  { border-color: var(--red);    color: #d06060; }
+        #status-pill.success { border-color: var(--green);  color: #6ac87c; }
+        #status-pill.partial { border-color: var(--yellow); color: #d0aa40; }
 
         /* --- MISSION CONTROL PANEL --- */
         #mission-ctrl {
             position: fixed;
-            top: 56px;
+            top: 52px;
             left: 14px;
             z-index: 1000;
             background: var(--surface);
             border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 10px 12px;
+            border-radius: 3px;
+            padding: 9px 11px;
             display: flex;
             flex-direction: column;
-            gap: 6px;
-            backdrop-filter: blur(8px);
-            font-family: 'Share Tech Mono', monospace;
+            gap: 5px;
         }
 
         #mission-ctrl .ctrl-label {
-            font-size: 10px;
+            font-size: 9px;
             text-transform: uppercase;
-            letter-spacing: 1.5px;
+            letter-spacing: 1px;
             color: var(--muted);
-            margin-bottom: 2px;
-            font-family: 'Orbitron', sans-serif;
+            margin-bottom: 1px;
+            font-weight: 600;
         }
 
-        .ctrl-row {
-            display: flex;
-            gap: 6px;
-        }
+        .ctrl-row { display: flex; gap: 5px; }
 
         .mc-btn {
             flex: 1;
             font-size: 11px;
-            font-weight: 700;
-            padding: 7px 8px;
-            border-radius: 7px;
+            font-weight: 600;
+            padding: 6px 8px;
+            border-radius: 3px;
             border: 1px solid var(--border);
-            background: rgba(255, 255, 255, .07);
+            background: linear-gradient(to bottom, #353c48, #2c3340);
             color: var(--text);
             cursor: pointer;
-            transition: .2s;
+            transition: .15s;
             text-align: center;
-            font-family: 'Orbitron', sans-serif;
-            letter-spacing: 1px;
-            text-transform: uppercase;
+            white-space: nowrap;
         }
 
-        .mc-btn:hover:not(:disabled) {
-            background: rgba(255, 255, 255, .14);
-        }
+        .mc-btn:hover:not(:disabled) { background: linear-gradient(to bottom, #3f4858, #353c4a); }
+        .mc-btn:disabled { opacity: .35; cursor: not-allowed; }
 
-        .mc-btn:disabled {
-            opacity: .35;
-            cursor: not-allowed;
-        }
-
-        .mc-btn.btn-start {
-            border-color: var(--green);
-            color: var(--green);
-        }
-
-        .mc-btn.btn-start:hover:not(:disabled) {
-            background: rgba(34, 197, 94, .15);
-        }
-
-        .mc-btn.btn-pause {
-            border-color: var(--yellow);
-            color: var(--yellow);
-        }
-
-        .mc-btn.btn-pause:hover:not(:disabled) {
-            background: rgba(245, 158, 11, .15);
-        }
-
-        .mc-btn.btn-stop {
-            border-color: var(--red);
-            color: var(--red);
-        }
-
-        .mc-btn.btn-stop:hover:not(:disabled) {
-            background: rgba(239, 68, 68, .15);
-        }
-
-        .mc-btn.btn-restart {
-            border-color: var(--accent);
-            color: var(--accent);
-        }
-
-        .mc-btn.btn-restart:hover:not(:disabled) {
-            background: rgba(61, 120, 255, .15);
-        }
+        .mc-btn.btn-start   { border-color: var(--green);  color: #6ac87c; }
+        .mc-btn.btn-start:hover:not(:disabled)   { background: linear-gradient(to bottom, #2a4032, #203328); }
+        .mc-btn.btn-pause   { border-color: var(--yellow); color: #d0aa40; }
+        .mc-btn.btn-pause:hover:not(:disabled)   { background: linear-gradient(to bottom, #3a3018, #2c2410); }
+        .mc-btn.btn-stop    { border-color: var(--red);    color: #d06060; }
+        .mc-btn.btn-stop:hover:not(:disabled)    { background: linear-gradient(to bottom, #3a2020, #2c1818); }
+        .mc-btn.btn-restart { border-color: var(--accent); color: #6aabde; }
+        .mc-btn.btn-restart:hover:not(:disabled) { background: linear-gradient(to bottom, #253045, #1c2838); }
 
         /* --- BOTTOM HUD --- */
         #hud {
             position: fixed;
-            bottom: 16px;
+            bottom: 14px;
             left: 50%;
             transform: translateX(-50%);
             display: flex;
-            gap: 10px;
+            gap: 8px;
             z-index: 1000;
             flex-wrap: wrap;
             justify-content: center;
@@ -270,69 +193,51 @@
         .hud-card {
             background: var(--surface);
             border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 9px 14px;
-            backdrop-filter: blur(8px);
+            border-radius: 3px;
+            padding: 8px 14px;
             min-width: 80px;
             text-align: center;
-            font-family: 'Share Tech Mono', monospace;
         }
 
         .hud-label {
-            font-size: 8px;
+            font-size: 9px;
             text-transform: uppercase;
-            letter-spacing: 1.5px;
+            letter-spacing: 0.5px;
             color: var(--muted);
             margin-bottom: 3px;
-            font-family: 'Orbitron', sans-serif;
+            font-weight: 600;
         }
 
         .hud-value {
-            font-size: 22px;
-            font-weight: 900;
+            font-size: 20px;
+            font-weight: 700;
             color: var(--text);
-            font-family: 'Orbitron', sans-serif;
+            font-family: 'Share Tech Mono', monospace;
         }
 
-        .hud-value.c-accent {
-            color: var(--accent);
-        }
-
-        .hud-value.c-good {
-            color: var(--green);
-        }
-
-        .hud-value.c-warn {
-            color: var(--yellow);
-        }
-
-        .hud-value.c-danger {
-            color: var(--red);
-        }
+        .hud-value.c-accent { color: var(--accent); }
+        .hud-value.c-good   { color: var(--green); }
+        .hud-value.c-warn   { color: var(--yellow); }
+        .hud-value.c-danger { color: var(--red); }
 
         /* --- LEGEND --- */
         #legend {
             position: fixed;
-            bottom: 16px;
-            right: 16px;
+            bottom: 14px;
+            right: 14px;
             background: var(--surface);
             border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 9px 12px;
+            border-radius: 3px;
+            padding: 8px 11px;
             z-index: 1000;
-            font-size: 10px;
+            font-size: 11px;
             color: var(--text);
-            backdrop-filter: blur(8px);
-            line-height: 1.9;
-            font-family: 'Share Tech Mono', monospace;
-            text-transform: uppercase;
-            letter-spacing: .5px;
+            line-height: 1.85;
         }
 
         .leg-dot {
             display: inline-block;
-            width: 9px;
-            height: 9px;
+            width: 8px; height: 8px;
             border-radius: 50%;
             margin-right: 5px;
             vertical-align: middle;
@@ -341,266 +246,268 @@
         /* --- DEPLOY PANEL --- */
         #deploy-panel {
             position: fixed;
-            top: 56px;
+            top: 52px;
             left: 14px;
             width: 230px;
-            background: rgba(15, 17, 23, .97);
-            border: 1px solid rgba(109, 133, 153, .7);
-            border-radius: 10px;
-            padding: 12px 14px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            padding: 11px 13px;
             z-index: 1001;
             display: none;
-            backdrop-filter: blur(10px);
-            font-family: 'Share Tech Mono', monospace;
         }
 
         #deploy-panel h3 {
-            font-family: 'Orbitron', sans-serif;
-            font-size: 9px;
-            letter-spacing: 2px;
+            font-size: 10px;
+            font-weight: 600;
             text-transform: uppercase;
-            color: rgba(179, 202, 48, .9);
-            margin-bottom: 10px;
+            letter-spacing: 0.5px;
+            color: var(--accent);
+            margin-bottom: 9px;
         }
 
         .dp-row {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 6px;
-            font-size: 10px;
-            color: #aab4c4;
+            margin-bottom: 5px;
+            font-size: 11px;
+            color: var(--text);
         }
 
         .dp-row input[type=range] {
-            width: 90px;
+            -webkit-appearance: none;
+            width: 90px; height: 4px;
+            background: #3d4550; border-radius: 2px; outline: none; cursor: pointer;
+        }
+
+        .dp-row input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 12px; height: 12px;
+            background: var(--accent); border-radius: 50%; border: 2px solid #7ab0e0;
         }
 
         .dp-val {
             min-width: 28px;
             text-align: right;
-            color: #b3ca30;
-            font-weight: 700;
+            color: var(--accent);
+            font-weight: 600;
+            font-family: 'Share Tech Mono', monospace;
         }
 
-        .dp-sep {
-            height: 1px;
-            background: rgba(109, 133, 153, .35);
-            margin: 8px 0;
-        }
+        .dp-sep { height: 1px; background: var(--border); margin: 7px 0; }
 
         .dp-btn {
             width: 100%;
-            padding: 7px;
-            border-radius: 6px;
-            border: 1px solid rgba(109, 133, 153, .6);
-            background: rgba(255, 255, 255, .06);
-            color: #cdd6f4;
+            padding: 6px;
+            border-radius: 3px;
+            border: 1px solid var(--border);
+            background: linear-gradient(to bottom, #353c48, #2c3340);
+            color: var(--text);
             cursor: pointer;
-            font-family: 'Orbitron', sans-serif;
-            font-size: 9px;
-            letter-spacing: 1px;
-            text-transform: uppercase;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            font-size: 11px;
             margin-top: 4px;
-            transition: .2s;
+            transition: .15s;
         }
 
-        .dp-btn:hover {
-            background: rgba(255, 255, 255, .13);
-        }
-
-        .dp-btn.green {
-            border-color: #19a725;
-            color: #19a725;
-        }
-
-        .dp-btn.green:hover {
-            background: rgba(25, 167, 37, .15);
-        }
+        .dp-btn:hover { background: linear-gradient(to bottom, #3f4858, #353c4a); }
+        .dp-btn.green { border-color: var(--green); color: #6ac87c; }
+        .dp-btn.green:hover { background: linear-gradient(to bottom, #2a4032, #203328); }
 
         /* --- PATH LINE --- */
         @keyframes dash {
-            to { stroke-dashoffset: -12; }
+            to {
+                stroke-dashoffset: -12;
+            }
         }
 
         /* --- MISSION END BANNER (compact top strip) --- */
         #end-banner {
             display: none;
             position: fixed;
-            top: 64px;
+            top: 52px;
             left: 50%;
             transform: translateX(-50%);
-            padding: 10px 24px;
-            border-radius: 10px;
-            font-size: 16px;
-            font-weight: 900;
+            padding: 8px 22px;
+            border-radius: 3px;
+            font-size: 14px;
+            font-weight: 700;
             text-align: center;
-            border: 2px solid;
+            border: 1px solid;
             z-index: 2000;
             animation: pulse 2s infinite;
             pointer-events: none;
+            white-space: nowrap;
         }
-        @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.7; } }
-        #end-banner.success { background:rgba(34,197,94,.2); color:var(--green); border-color:var(--green); }
-        #end-banner.partial  { background:rgba(245,158,11,.2); color:var(--yellow); border-color:var(--yellow); }
-        #end-banner.failed   { background:rgba(239,68,68,.2);  color:var(--red);    border-color:var(--red); }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .6; }
+        }
+
+        #end-banner.success { background: rgba(77,165,94,.18);  color: #6ac87c; border-color: var(--green); }
+        #end-banner.partial { background: rgba(201,163,46,.18); color: #d0aa40; border-color: var(--yellow); }
+        #end-banner.failed  { background: rgba(184,68,68,.18);  color: #d06060; border-color: var(--red); }
 
         /* --- MISSION REPORT PANEL --- */
         #report-overlay {
             display: none;
             position: fixed;
             inset: 0;
-            background: rgba(0,0,0,.72);
+            background: rgba(0, 0, 0, .72);
             z-index: 3000;
             align-items: center;
             justify-content: center;
         }
+
         #report-box {
-            background: #0f1420;
-            border: 1px solid rgba(109,133,153,.8);
-            border-radius: 14px;
-            padding: 28px 32px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            padding: 24px 28px;
             min-width: 340px;
             max-width: 520px;
             width: 90vw;
-            box-shadow: 0 0 60px rgba(0,0,0,.9);
-            font-family: 'Share Tech Mono', monospace;
+            box-shadow: 0 0 40px rgba(0,0,0,.8);
+            font-family: 'Segoe UI', system-ui, sans-serif;
         }
+
         #report-box h2 {
             font-family: 'Orbitron', sans-serif;
-            font-size: 20px;
-            font-weight: 900;
-            letter-spacing: 3px;
+            font-size: 17px;
+            font-weight: 700;
+            letter-spacing: 2px;
             text-transform: uppercase;
             text-align: center;
-            margin-bottom: 20px;
+            margin-bottom: 18px;
         }
+
         #report-box h2.success { color: var(--green); }
         #report-box h2.partial { color: var(--yellow); }
         #report-box h2.failed  { color: var(--red); }
+
         .rpt-row {
             display: flex;
             justify-content: space-between;
-            padding: 6px 0;
-            border-bottom: 1px solid rgba(109,133,153,.2);
+            padding: 5px 0;
+            border-bottom: 1px solid var(--border);
             font-size: 13px;
-            color: #aab4c4;
+            color: var(--muted);
         }
+
         .rpt-row:last-of-type { border-bottom: none; }
-        .rpt-val { font-weight: 700; color: #e0e6f0; }
-        .rpt-agents {
-            margin: 12px 0;
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(110px,1fr));
-            gap: 8px;
+
+        .rpt-val {
+            font-weight: 600;
+            color: var(--text);
+            font-family: 'Share Tech Mono', monospace;
         }
+
+        .rpt-agents {
+            margin: 10px 0;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+            gap: 7px;
+        }
+
         .rpt-agent-card {
-            background: rgba(255,255,255,.05);
-            border-radius: 8px;
+            background: rgba(255,255,255,.04);
+            border-radius: 3px;
             padding: 8px 10px;
             text-align: center;
             font-size: 11px;
         }
-        .rpt-agent-score { font-size: 22px; font-weight: 900; font-family:'Orbitron',sans-serif; }
-        .rpt-actions { display:flex; gap:10px; margin-top:18px; }
-        .rpt-btn {
-            flex: 1; padding: 9px; border-radius: 8px; border: 1px solid rgba(109,133,153,.6);
-            background: rgba(255,255,255,.07); color: #cdd6f4; cursor: pointer;
-            font-family:'Orbitron',sans-serif; font-size:10px; letter-spacing:1px;
-            text-transform:uppercase; transition:.2s;
+
+        .rpt-agent-score {
+            font-size: 20px;
+            font-weight: 700;
+            font-family: 'Share Tech Mono', monospace;
         }
-        .rpt-btn:hover { background:rgba(255,255,255,.15); }
-        .rpt-btn.accent { border-color:var(--accent); color:var(--accent); }
+
+        .rpt-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 18px;
+        }
+
+        .rpt-btn {
+            flex: 1;
+            padding: 8px;
+            border-radius: 3px;
+            border: 1px solid var(--border);
+            background: linear-gradient(to bottom, #353c48, #2c3340);
+            color: var(--text);
+            cursor: pointer;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            font-size: 11px;
+            transition: .15s;
+        }
+
+        .rpt-btn:hover { background: linear-gradient(to bottom, #3f4858, #353c4a); }
+
+        .rpt-btn.accent {
+            border-color: var(--accent);
+            color: #6aabde;
+        }
+
         /* Print: show only report, hide map/controls */
         @media print {
-            body > *:not(#report-overlay) { display:none !important; }
-            #report-overlay { display:flex !important; position:static; background:white; }
-            #report-box { box-shadow:none; border:none; color:#000; }
-            #report-box h2, .rpt-val, .rpt-agent-score { color:#000 !important; }
-            .rpt-actions { display:none; }
+            body>*:not(#report-overlay) {
+                display: none !important;
+            }
+
+            #report-overlay {
+                display: flex !important;
+                position: static;
+                background: white;
+            }
+
+            #report-box {
+                box-shadow: none;
+                border: none;
+                color: #000;
+            }
+
+            #report-box h2,
+            .rpt-val,
+            .rpt-agent-score {
+                color: #000 !important;
+            }
+
+            .rpt-actions {
+                display: none;
+            }
         }
 
-        /* --- FOLLOW TOGGLE --- */
-        #follow-toggle {
+        /* --- RIGHT-SIDE TOGGLES --- */
+        #follow-toggle, #buildings-toggle, #view-3d-toggle, #fov-toggle {
             position: fixed;
-            top: 56px;
             right: 14px;
             background: var(--surface);
             border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 7px 11px;
+            border-radius: 3px;
+            padding: 6px 10px;
             z-index: 1000;
             font-size: 11px;
-            color: var(--text);
+            color: var(--muted);
             cursor: pointer;
-            backdrop-filter: blur(8px);
             user-select: none;
+            transition: .15s;
         }
 
-        #follow-toggle.on {
-            border-color: var(--accent);
-            color: var(--accent);
-        }
+        #follow-toggle     { top: 52px; }
+        #buildings-toggle  { top: 90px; display: none; }
+        #view-3d-toggle    { top: 128px; }
+        #fov-toggle        { top: 166px; }
 
-        #buildings-toggle {
-            position: fixed;
-            top: 96px;
-            right: 14px;
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 7px 11px;
-            z-index: 1000;
-            font-size: 11px;
-            color: var(--text);
-            cursor: pointer;
-            backdrop-filter: blur(8px);
-            user-select: none;
-            display: none;
-        }
+        #follow-toggle:hover, #buildings-toggle:hover,
+        #view-3d-toggle:hover, #fov-toggle:hover { color: var(--text); border-color: #5a6278; }
 
-        #buildings-toggle.on {
-            border-color: var(--yellow);
-            color: var(--yellow);
-        }
-        #view-3d-toggle {
-            position: fixed;
-            top: 136px;
-            right: 14px;
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 7px 11px;
-            z-index: 1000;
-            font-size: 11px;
-            color: var(--text);
-            cursor: pointer;
-            backdrop-filter: blur(8px);
-            user-select: none;
-        }
-        #view-3d-toggle.on {
-            border-color: #a855f7;
-            color: #a855f7;
-        }
-        #fov-toggle {
-            position: fixed;
-            top: 176px;
-            right: 14px;
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 7px 11px;
-            z-index: 1000;
-            font-size: 11px;
-            color: var(--text);
-            cursor: pointer;
-            backdrop-filter: blur(8px);
-            user-select: none;
-        }
-        #fov-toggle.on {
-            border-color: #00d4ff;
-            color: #00d4ff;
-        }
+        #follow-toggle.on      { border-color: var(--accent);  color: #6aabde; }
+        #buildings-toggle.on   { border-color: var(--yellow);  color: #d0aa40; }
+        #view-3d-toggle.on     { border-color: #8a60d0; color: #b090e8; }
+        #fov-toggle.on         { border-color: var(--accent);  color: #6aabde; }
     </style>
 </head>
 
@@ -612,7 +519,7 @@
         <h1>SAR Live Mission</h1>
         <div id="status-pill">STANDBY</div>
         <span id="topbar-elapsed"
-            style="font-size:16px;font-weight:900;color:var(--text);font-variant-numeric:tabular-nums;">00:00</span>
+            style="font-size:15px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;font-family:'Share Tech Mono',monospace;">00:00</span>
         <div class="top-sep"></div>
         <span id="speed-label">Speed:</span>
         <button class="speed-btn" data-mult="0.5" onclick="setSpeed(0.5)">0.5×</button>
@@ -624,8 +531,8 @@
         <button class="speed-btn" data-mult="32" onclick="setSpeed(32)">32×</button>
         <button class="speed-btn" data-mult="100" onclick="setSpeed(100)">100×</button>
         <div class="top-sep"></div>
-        <button class="top-btn" onclick="toggleDeployPanel()" id="btn-new-mission">⊕ New Mission</button>
-        <a class="top-btn" href="dashboard.html" target="_blank" style="border-color:#00d4ff;color:#00d4ff;">🎯 Dashboard</a>
+        <button class="top-btn" onclick="toggleDeployPanel()" id="btn-new-mission">+ New Mission</button>
+        <a class="top-btn" href="dashboard.html" target="_blank" style="border-color:#00d4ff;color:#00d4ff;">Dashboard</a>
         <a class="top-btn" href="index.html">← Control</a>
         <a class="top-btn" href="stats.html" target="_blank">Analytics</a>
     </div>
@@ -650,8 +557,8 @@
         <div class="dp-row"><span>Detect R</span><input id="dp-drad" type="range" min="20" max="150" value="50"
                 oninput="dpV('dp-drad','dp-v-drad')"><span class="dp-val" id="dp-v-drad">50</span></div>
         <div class="dp-sep"></div>
-        <button class="dp-btn green" onclick="deployNewMission()">▶ Deploy New Mission</button>
-        <button class="dp-btn" onclick="document.getElementById('deploy-panel').style.display='none'">✕ Close</button>
+        <button class="dp-btn green" onclick="deployNewMission()">Deploy New Mission</button>
+        <button class="dp-btn" onclick="document.getElementById('deploy-panel').style.display='none'">Close</button>
     </div>
 
     <!-- Mission control panel -->
@@ -668,10 +575,10 @@
     </div>
 
     <!-- UI Toggles -->
-    <div id="follow-toggle" onclick="toggleFollow()">[ ] Follow Agent</div>
-    <div id="buildings-toggle" onclick="toggleBuildings()">🏢 Show Buildings</div>
-    <div id="view-3d-toggle" onclick="toggleView3D()">◈ 3D View</div>
-    <div id="fov-toggle" class="on" onclick="toggleFovOverlay()">📡 Sensor FOV</div>
+    <div id="follow-toggle" onclick="toggleFollow()">Follow Agent</div>
+    <div id="buildings-toggle" class="on" onclick="toggleBuildings()">Hide 3D Buildings</div>
+    <div id="view-3d-toggle" onclick="toggleView3D()">3D View</div>
+    <div id="fov-toggle" class="on" onclick="toggleFovOverlay()">Sensor FOV</div>
 
     <div id="end-banner"></div>
 
@@ -679,11 +586,12 @@
     <div id="report-overlay">
         <div id="report-box">
             <h2 id="rpt-title">Mission Complete</h2>
-            <div class="rpt-row"><span>Outcome</span><span class="rpt-val" id="rpt-outcome">—</span></div>
-            <div class="rpt-row"><span>Final Score</span><span class="rpt-val" id="rpt-score">—</span></div>
-            <div class="rpt-row"><span>Elapsed Time</span><span class="rpt-val" id="rpt-elapsed">—</span></div>
-            <div class="rpt-row"><span>Targets Collected</span><span class="rpt-val" id="rpt-targets">—</span></div>
-            <div class="rpt-row" style="border-bottom:1px solid rgba(109,133,153,.2);padding-bottom:10px;"><span>Agents</span><span class="rpt-val" id="rpt-nagents">—</span></div>
+            <div class="rpt-row"><span>Outcome</span><span class="rpt-val" id="rpt-outcome">-</span></div>
+            <div class="rpt-row"><span>Final Score</span><span class="rpt-val" id="rpt-score">-</span></div>
+            <div class="rpt-row"><span>Elapsed Time</span><span class="rpt-val" id="rpt-elapsed">-</span></div>
+            <div class="rpt-row"><span>Targets Collected</span><span class="rpt-val" id="rpt-targets">-</span></div>
+            <div class="rpt-row" style="border-bottom:1px solid rgba(109,133,153,.2);padding-bottom:10px;">
+                <span>Agents</span><span class="rpt-val" id="rpt-nagents">-</span></div>
             <div class="rpt-agents" id="rpt-agents-grid"></div>
             <div class="rpt-actions">
                 <button class="rpt-btn" onclick="window.print()">Print / Export</button>
@@ -735,7 +643,7 @@
             },
             center: [22.433, 38.900],
             zoom: 15,
-            pitch: 0, 
+            pitch: 0,
             maxZoom: 24,
             attributionControl: false
         });
@@ -823,6 +731,9 @@
             // Re-fire data loaders if they were called before map load
             if (_buildingsData) updateBuildingsSource();
             if (_geofenceFeature) updateGeofenceSource();
+            
+            // Auto-fetch buildings on initial load
+            fetchBuildings();
         });
 
         // --- State ---
@@ -842,7 +753,7 @@
             followRobot = !followRobot;
             let btn = document.getElementById('follow-toggle');
             btn.className = followRobot ? 'on' : '';
-            btn.textContent = followRobot ? 'Follow ON' : 'Follow OFF';
+            btn.textContent = followRobot ? 'Follow: ON' : 'Follow: OFF';
         }
 
         function fmtTime(sec) {
@@ -861,24 +772,24 @@
         // ── Mission Control Buttons ──
         function setMCButtons(state) {
             mcState = state;
-            const s  = document.getElementById('mc-start');
-            const p  = document.getElementById('mc-pause');
+            const s = document.getElementById('mc-start');
+            const p = document.getElementById('mc-pause');
             const st = document.getElementById('mc-stop');
-            const r  = document.getElementById('mc-restart');
+            const r = document.getElementById('mc-restart');
             if (!s) return; // guard if panel not yet in DOM
             s.disabled = true; p.disabled = true; st.disabled = true; r.disabled = true;
             s.textContent = 'Start';
-            if (state === 'idle')       { s.disabled = false; }
-            else if (state === 'running')   { p.disabled = false; st.disabled = false; }
-            else if (state === 'paused')    { s.disabled = false; s.textContent = '▶ Resume'; st.disabled = false; }
+            if (state === 'idle') { s.disabled = false; }
+            else if (state === 'running') { p.disabled = false; st.disabled = false; }
+            else if (state === 'paused') { s.disabled = false; s.textContent = 'Resume'; st.disabled = false; }
             else if (state === 'stopped' || state === 'game_over') { r.disabled = false; }
         }
 
         async function mcStart() {
             try {
                 const res = await fetch('http://127.0.0.1:8000/api/sim/start', { method: 'POST' });
-                const d   = await res.json();
-                if (d.status === 'running')   { setMCButtons('running'); missionDone = false; document.getElementById('end-banner').style.display = 'none'; }
+                const d = await res.json();
+                if (d.status === 'running') { setMCButtons('running'); missionDone = false; document.getElementById('end-banner').style.display = 'none'; }
                 else if (d.status === 'game_over') setMCButtons('game_over');
             } catch (e) { }
         }
@@ -954,13 +865,13 @@
             for (const id in enemyMarkers) enemyMarkers[id].remove();
             for (const id in targetMarkers) targetMarkers[id].remove();
             agentMarkers = {}; enemyMarkers = {}; targetMarkers = {};
-            
+
             // Clear GeoJSON paths/rings
-            if(mapLoaded) {
-                map.getSource('agent-paths').setData({type: 'FeatureCollection', features: []});
-                map.getSource('enemy-rings').setData({type: 'FeatureCollection', features: []});
+            if (mapLoaded) {
+                map.getSource('agent-paths').setData({ type: 'FeatureCollection', features: [] });
+                map.getSource('enemy-rings').setData({ type: 'FeatureCollection', features: [] });
             }
-            
+
             lastAgentCount = 0;
             missionDone = false;
             document.getElementById('end-banner').style.display = 'none';
@@ -975,7 +886,8 @@
                 document.getElementById('hud').innerHTML = hudBaseHTML();
                 setMCButtons('idle');
                 document.getElementById('status-pill').textContent = 'READY';
-                map.panTo([params.lon, params.lat], {duration: 500});
+                map.panTo([params.lon, params.lat], { duration: 500 });
+                setTimeout(fetchBuildings, 1000); // Fetch buildings after vector update
             } catch (e) {
                 document.getElementById('status-pill').textContent = 'DEPLOY ERROR';
             }
@@ -989,17 +901,17 @@
                 document.getElementById('status-pill').className = '';
                 document.getElementById('status-pill').textContent = 'READY';
                 document.getElementById('topbar-elapsed').textContent = '00:00';
-                
+
                 // Clear map markers
                 for (const id in agentMarkers) agentMarkers[id].remove();
                 for (const id in enemyMarkers) enemyMarkers[id].remove();
                 for (const id in targetMarkers) targetMarkers[id].remove();
-                
-                if(mapLoaded) {
-                    map.getSource('agent-paths').setData({type: 'FeatureCollection', features: []});
-                    map.getSource('enemy-rings').setData({type: 'FeatureCollection', features: []});
+
+                if (mapLoaded) {
+                    map.getSource('agent-paths').setData({ type: 'FeatureCollection', features: [] });
+                    map.getSource('enemy-rings').setData({ type: 'FeatureCollection', features: [] });
                 }
-                
+
                 agentMarkers = {}; enemyMarkers = {}; targetMarkers = {};
                 lastAgentCount = 0;
                 document.getElementById('hud').innerHTML = hudBaseHTML();
@@ -1052,24 +964,24 @@
             agents.forEach(ag => {
                 const el = document.getElementById(`hud-agent-${ag.id}`);
                 if (el) el.textContent = ag.score;
-                
+
                 const canvas = document.getElementById(`lidar-${ag.id}`);
                 if (canvas && ag.lidar) {
                     const ctx = canvas.getContext('2d');
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
-                    const cx = canvas.width/2.0, cy = canvas.height/2.0;
-                    
+                    const cx = canvas.width / 2.0, cy = canvas.height / 2.0;
+
                     // Center agent dot
                     ctx.fillStyle = '#10b981';
-                    ctx.beginPath(); ctx.arc(cx, cy, 2, 0, 2*Math.PI); ctx.fill();
-                    
+                    ctx.beginPath(); ctx.arc(cx, cy, 2, 0, 2 * Math.PI); ctx.fill();
+
                     // Rays
                     ctx.strokeStyle = '#10b981AA';
                     ctx.lineWidth = 1;
                     ctx.beginPath();
                     ag.lidar.forEach((range, i) => {
-                        const angle = (i * 10 * Math.PI) / 180 - Math.PI/2;
-                        const r = range * (40/30.0); // 30m range scaled to 40px radius
+                        const angle = (i * 10 * Math.PI) / 180 - Math.PI / 2;
+                        const r = range * (40 / 30.0); // 30m range scaled to 40px radius
                         const px = cx + Math.cos(angle) * r;
                         const py = cy + Math.sin(angle) * r;
                         if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
@@ -1083,7 +995,7 @@
                 const camEl = document.getElementById(`camera-${ag.id}`);
                 if (camEl && ag.camera) {
                     if (ag.camera.length > 0) {
-                        camEl.innerHTML = ag.camera.map(d => `<span style="color:${d.type==='aggressive'?'#ef4444':'#f59e0b'}">${d.type.substring(0,4).toUpperCase()} [${d.dist_m}m]</span>`).join('<br>');
+                        camEl.innerHTML = ag.camera.map(d => `<span style="color:${d.type === 'aggressive' ? '#ef4444' : '#f59e0b'}">${d.type.substring(0, 4).toUpperCase()} [${d.dist_m}m]</span>`).join('<br>');
                     } else {
                         camEl.innerHTML = '<em>No targets in FOV</em>';
                     }
@@ -1101,9 +1013,9 @@
 
             // Compact banner
             let cls, label;
-            if (status?.includes('PARTIAL'))      { cls = 'partial'; label = 'PARTIAL SUCCESS'; }
+            if (status?.includes('PARTIAL')) { cls = 'partial'; label = 'PARTIAL SUCCESS'; }
             else if (status?.includes('SUCCESS')) { cls = 'success'; label = 'MISSION SUCCESS'; }
-            else                                  { cls = 'failed';  label = 'MISSION FAILED';  }
+            else { cls = 'failed'; label = 'MISSION FAILED'; }
             b.className = cls;
             b.textContent = `${label}  |  Score: ${score}`;
             b.style.display = 'block';
@@ -1122,22 +1034,22 @@
             const title = document.getElementById('rpt-title');
             title.className = cls;
             title.textContent = status?.includes('PARTIAL') ? 'Partial Success'
-                              : status?.includes('SUCCESS') ? 'Mission Complete'
-                              : 'Mission Failed';
-            document.getElementById('rpt-score').textContent   = score;
-            document.getElementById('rpt-outcome').textContent = status || '—';
+                : status?.includes('SUCCESS') ? 'Mission Complete'
+                    : 'Mission Failed';
+            document.getElementById('rpt-score').textContent = score;
+            document.getElementById('rpt-outcome').textContent = status || '-';
 
             // Fetch last stats for elapsed + agent breakdown
             try {
                 const d = await (await fetch('http://127.0.0.1:8000/api/stats')).json();
                 document.getElementById('rpt-elapsed').textContent = fmtTime(d.elapsed || 0);
                 const agents = d.agents_stats || [];
-                document.getElementById('rpt-nagents').textContent = agents.length || '—';
+                document.getElementById('rpt-nagents').textContent = agents.length || '-';
                 const remaining = d.targets_remaining ?? '?';
-                const total     = d.targets_total    ?? '?';
+                const total = d.targets_total ?? '?';
                 document.getElementById('rpt-targets').textContent =
                     (remaining === '?' || total === '?') ? '?' :
-                    `${total - remaining} / ${total}`;
+                        `${total - remaining} / ${total}`;
                 // Agent cards
                 const grid = document.getElementById('rpt-agents-grid');
                 grid.innerHTML = '';
@@ -1145,11 +1057,11 @@
                     const c = ag.color || AGENT_COLORS[ag.id % 4];
                     grid.innerHTML += `<div class="rpt-agent-card" style="border:1px solid ${c}55">
                         <div style="font-size:10px;color:${c};margin-bottom:4px;">AGENT ${ag.id}</div>
-                        <div class="rpt-agent-score" style="color:${c};">${ag.score ?? '—'}</div>
+                        <div class="rpt-agent-score" style="color:${c};">${ag.score ?? '-'}</div>
                         <div style="font-size:9px;color:#6c7086;margin-top:3px;">${ag.targets_collected ?? 0} targets</div>
                     </div>`;
                 });
-            } catch(e) { /* stats not critical */ }
+            } catch (e) { /* stats not critical */ }
 
             // Show overlay
             document.getElementById('report-overlay').style.display = 'flex';
@@ -1191,7 +1103,16 @@
                     } else {
                         agentMarkers[ag.id].setLngLat(lngLat);
                     }
-                    if (ag.id === 0 && followRobot) map.panTo(lngLat, { duration: 500 }); // smooth pan
+                    if (ag.id === 0 && followRobot) {
+                        const hC = ag.heading_compass ?? ((90-(ag.heading??0))%360+360)%360;
+                        map.easeTo({
+                            center: lngLat,
+                            bearing: hC,
+                            pitch: 60,
+                            duration: 200,
+                            easing: (t) => t // linear easing for smooth continuous updates
+                        });
+                    }
 
                     // Per-agent path
                     if (ag.auto_path && ag.auto_path.length > 1) {
@@ -1206,13 +1127,14 @@
                     }
 
                     // Camera FOV Wedge (Turf sector)
+                    // ag.heading is math degrees (0=East, CCW). Turf uses compass bearing (0=North, CW).
                     if (ag.heading !== undefined) {
-                        // 50m = 0.05km, FOV = 90 deg -> ±45 deg from heading
+                        const compassHdg = ((90 - ag.heading) % 360 + 360) % 360;
                         try {
-                            const sector = turf.sector(lngLat, 0.05, ag.heading - 45, ag.heading + 45, {steps: 16});
+                            const sector = turf.sector(lngLat, 0.08, (compassHdg - 45 + 360) % 360, (compassHdg + 45) % 360, { steps: 16 });
                             sector.properties = { color };
                             fovFeatures.push(sector);
-                        } catch(e) {}
+                        } catch (e) { }
                     }
 
                     // LiDAR Ring Polygon
@@ -1220,16 +1142,16 @@
                         try {
                             const coords = [];
                             ag.lidar.forEach((r, i) => {
-                                const angle = ag.heading + (i * 10);
-                                // Move at least 0.1m to avoid Turf topology errors on exact center overlaps
-                                const distKm = Math.max(0.1, r) / 1000.0; 
-                                const dest = turf.destination(lngLat, distKm, angle);
+                                // Convert each ray from math angle to compass bearing
+                                const compassAngle = ((90 - (ag.heading + i * 10)) % 360 + 360) % 360;
+                                const distKm = Math.max(0.1, r) / 1000.0;
+                                const dest = turf.destination(lngLat, distKm, compassAngle);
                                 coords.push(dest.geometry.coordinates);
                             });
-                            coords.push(coords[0]); // close polygon
-                            const lidarPoly = turf.polygon([coords], {color: color});
+                            coords.push(coords[0]);
+                            const lidarPoly = turf.polygon([coords], { color: color });
                             lidarFeatures.push(lidarPoly);
-                        } catch(e) {}
+                        } catch (e) { }
                     }
                 });
                 // Remove stale agent markers
@@ -1238,8 +1160,8 @@
                         agentMarkers[id].remove(); delete agentMarkers[id];
                     }
                 }
-                
-                if(mapLoaded) {
+
+                if (mapLoaded) {
                     map.getSource('agent-paths').setData({ type: 'FeatureCollection', features: pathFeatures });
                     if (_showFov) {
                         map.getSource('agent-fov').setData({ type: 'FeatureCollection', features: fovFeatures });
@@ -1255,10 +1177,19 @@
                     const pill = document.getElementById('status-pill');
                     pill.className = '';
                     if (data.game_over) {
-                        if (data.status?.includes('PARTIAL')) { pill.textContent = 'PARTIAL'; pill.classList.add('partial'); }
-                        else if (data.status?.includes('SUCCESS')) { pill.textContent = 'SUCCESS'; pill.classList.add('success'); }
-                        else { pill.textContent = 'FAILED'; pill.classList.add('danger'); }
-                        if (!missionDone) showEndBanner(data.status, data.score);
+                        if (data.status?.includes('STOP')) {
+                            pill.textContent = 'STOPPED';
+                            if (!missionDone) { missionDone = true; setMCButtons('stopped'); }
+                        } else if (data.status?.includes('PARTIAL')) {
+                            pill.textContent = 'PARTIAL'; pill.classList.add('partial');
+                            if (!missionDone) showEndBanner(data.status, data.score);
+                        } else if (data.status?.includes('SUCCESS')) {
+                            pill.textContent = 'SUCCESS'; pill.classList.add('success');
+                            if (!missionDone) showEndBanner(data.status, data.score);
+                        } else {
+                            pill.textContent = 'FAILED'; pill.classList.add('danger');
+                            if (!missionDone) showEndBanner(data.status, data.score);
+                        }
                     } else if (data.escape_mode) {
                         pill.textContent = 'EVADING'; pill.classList.add('warn');
                     } else if (agents.length > 0 && agents[0].lat) {
@@ -1279,7 +1210,7 @@
                         seenIds.add(e.id);
                         const color = e.type === 'aggressive' ? '#ef4444' : '#a855f7';
                         const lngLat = [e.lon, e.lat];
-                        
+
                         if (!enemyMarkers[e.id]) {
                             const el = document.createElement('div');
                             el.style.width = e.type === 'aggressive' ? '14px' : '10px';
@@ -1287,9 +1218,9 @@
                             el.style.background = color;
                             el.style.borderRadius = '50%';
                             el.style.border = '2px solid rgba(255,255,255,0.8)';
-                            enemyMarkers[e.id] = new maplibregl.Marker({element: el})
+                            enemyMarkers[e.id] = new maplibregl.Marker({ element: el })
                                 .setLngLat(lngLat)
-                                .setPopup(new maplibregl.Popup({offset: 10}).setText(`Enemy #${e.id} (${e.type})`))
+                                .setPopup(new maplibregl.Popup({ offset: 10 }).setText(`Enemy #${e.id} (${e.type})`))
                                 .addTo(map);
                         } else {
                             enemyMarkers[e.id].setLngLat(lngLat);
@@ -1298,17 +1229,17 @@
 
                         // Generate true-metric circle polygon for the detection ring using Turf.js
                         const radiusKm = (e.detection_radius_m || 50) / 1000;
-                        const circlePoly = turf.circle(lngLat, radiusKm, {steps: 32, units: 'kilometers'});
+                        const circlePoly = turf.circle(lngLat, radiusKm, { steps: 32, units: 'kilometers' });
                         circlePoly.properties = { color };
                         ringFeatures.push(circlePoly);
                     });
-                    
+
                     for (const id in enemyMarkers) {
                         if (!seenIds.has(parseInt(id))) {
                             enemyMarkers[id].remove(); delete enemyMarkers[id];
                         }
                     }
-                    if(mapLoaded) {
+                    if (mapLoaded) {
                         map.getSource('enemy-rings').setData({
                             type: 'FeatureCollection',
                             features: ringFeatures
@@ -1321,7 +1252,7 @@
                     const hudTg = document.getElementById('hud-targets');
                     if (hudTg) hudTg.textContent = data.targets.length;
                     const seenTids = new Set(data.targets.map(t => t.id));
-                    
+
                     data.targets.forEach(t => {
                         if (!targetMarkers[t.id]) {
                             const el = document.createElement('div');
@@ -1329,9 +1260,9 @@
                             el.style.background = 'gold'; el.style.borderRadius = '50%';
                             el.style.border = '2px solid white';
                             el.style.boxShadow = '0 0 10px gold';
-                            targetMarkers[t.id] = new maplibregl.Marker({element: el})
+                            targetMarkers[t.id] = new maplibregl.Marker({ element: el })
                                 .setLngLat([t.lon, t.lat])
-                                .setPopup(new maplibregl.Popup({offset: 10}).setText(`Target #${t.id}`))
+                                .setPopup(new maplibregl.Popup({ offset: 10 }).setText(`Target #${t.id}`))
                                 .addTo(map);
                         }
                     });
@@ -1367,7 +1298,7 @@
 
         // ── Buildings & Sensors ──
         let _buildingsData = null;
-        let _showBuildings = false;
+        let _showBuildings = true;
         let _showFov = true;
 
 
@@ -1407,25 +1338,40 @@
             try {
                 const res = await fetch('http://127.0.0.1:8000/api/map/buildings');
                 const d = await res.json();
-                if (d.features && d.features.length > 0) {
-                    _buildingsData = d.features;
+                const bldgs = d.buildings || d.features || [];
+                if (bldgs.length > 0) {
+                    // Convert raw building data to GeoJSON features for MapLibre fill-extrusion
+                    _buildingsData = bldgs.map(b => {
+                        // Handle both formats: raw {coordinates, height_m} and GeoJSON Feature
+                        if (b.type === 'Feature') return b;
+                        return {
+                            type: 'Feature',
+                            properties: { height_m: b.height_m || 8.0 },
+                            geometry: {
+                                type: b.type || 'Polygon',
+                                coordinates: b.coordinates
+                            }
+                        };
+                    });
                     document.getElementById('buildings-toggle').style.display = 'block';
+                    // Auto-load buildings into source if map is already loaded
+                    if (mapLoaded && _showBuildings) updateBuildingsSource();
                 }
-            } catch(e) {}
+            } catch (e) { console.warn('Buildings fetch failed:', e); }
         }
-        
+
         function toggleBuildings() {
             if (!_buildingsData) return;
             _showBuildings = !_showBuildings;
             const btn = document.getElementById('buildings-toggle');
             if (_showBuildings) {
                 btn.classList.add('on');
-                btn.innerHTML = '🏢 Hide 3D Buildings';
-                map.easeTo({pitch: 65, bearing: 20, duration: 1500});
+                btn.innerHTML = 'Hide 3D Buildings';
+                map.easeTo({ pitch: 65, bearing: 20, duration: 1500 });
             } else {
                 btn.classList.remove('on');
-                btn.innerHTML = '🏢 Show Buildings';
-                map.easeTo({pitch: 0, bearing: 0, duration: 1500});
+                btn.innerHTML = 'Show Buildings';
+                map.easeTo({ pitch: 0, bearing: 0, duration: 1500 });
             }
             updateBuildingsSource();
         }
@@ -1455,7 +1401,7 @@
                     };
                     updateGeofenceSource();
                 }
-            } catch(e) { /* no geofence */ }
+            } catch (e) { /* no geofence */ }
         }
         loadGeofenceOverlay();
 

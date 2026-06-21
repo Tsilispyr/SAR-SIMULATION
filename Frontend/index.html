@@ -1,4 +1,4 @@
-<!-- V13 — Mission Control: lat/lon inputs, draw-region, agent speed slider -->
+<!-- V13 - Mission Control: lat/lon inputs, draw-region, agent speed slider -->
 <!DOCTYPE html>
 <html lang="en">
 
@@ -12,136 +12,170 @@
         rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
     <style>
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
+        *,*::before,*::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg: #1b1f24;
+            --surface: #252930;
+            --border: #3d4550;
+            --accent: #4d87c7;
+            --green: #4da55e;
+            --yellow: #c9a32e;
+            --red: #b84444;
+            --text: #c4cad6;
+            --muted: #7a8496;
         }
 
         body {
-            font-family: 'Share Tech Mono', 'Space Mono', monospace;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
             display: flex;
             height: 100vh;
-            background: #1a1a1a;
-            color: #eee;
+            background: var(--bg);
+            color: var(--text);
         }
 
         /* ---- SIDEBAR ---- */
         #sidebar {
             width: 310px;
-            background: #252526;
-            padding: 16px;
+            min-width: 310px;
+            background: var(--surface);
+            padding: 14px;
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 7px;
             overflow-y: auto;
-            box-shadow: 2px 0 10px rgba(0, 0, 0, .5);
+            border-right: 1px solid var(--border);
+            flex-shrink: 0;
         }
 
         h2 {
-            color: #007acc;
-            font-size: 18px;
+            color: var(--accent);
+            font-size: 13px;
             font-family: 'Orbitron', sans-serif;
             text-transform: uppercase;
             letter-spacing: 2px;
         }
 
         h3 {
-            font-size: 11px;
-            color: #bbb;
-            border-bottom: 1px solid #444;
+            font-size: 10px;
+            color: var(--muted);
+            border-bottom: 1px solid var(--border);
             padding-bottom: 4px;
-            margin-bottom: 6px;
-            font-family: 'Orbitron', sans-serif;
+            margin-bottom: 5px;
+            font-family: 'Segoe UI', system-ui, sans-serif;
             text-transform: uppercase;
-            letter-spacing: 1.5px;
+            letter-spacing: 0.5px;
+            font-weight: 600;
         }
 
-        .control-group {
-            margin-bottom: 8px;
-        }
+        .control-group { margin-bottom: 5px; }
 
         label {
             display: flex;
             justify-content: space-between;
             font-size: 12px;
             margin-bottom: 3px;
+            color: var(--text);
         }
 
         input[type="range"] {
+            -webkit-appearance: none;
             width: 100%;
+            height: 4px;
+            background: #3d4550;
+            border-radius: 2px;
+            outline: none;
+            cursor: pointer;
+            margin-bottom: 2px;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 7px; height: 16px;
+            background: var(--accent);
+            border-radius: 3px;
+            border: none;
+            cursor: pointer;
+        }
+
+        input[type="range"]::-moz-range-thumb {
+            width: 7px; height: 16px;
+            background: var(--accent);
+            border-radius: 3px;
+            border: none;
             cursor: pointer;
         }
 
         input[type="number"],
         input[type="text"] {
             width: 100%;
-            background: #333;
-            color: #eee;
-            border: 1px solid #555;
-            border-radius: 4px;
+            background: rgba(0,0,0,.35);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 3px;
             padding: 5px 8px;
-            font-size: 13px;
+            font-size: 12px;
+            font-family: 'Segoe UI', system-ui, sans-serif;
         }
 
         input[type="number"]:focus,
-        input[type="text"]:focus {
-            outline: none;
-            border-color: #007acc;
+        input[type="text"]:focus { outline: none; border-color: var(--accent); }
+
+        select {
+            width: 100%;
+            margin-bottom: 6px;
+            padding: 5px 8px;
+            border-radius: 3px;
+            border: 1px solid var(--border);
+            background: rgba(0,0,0,.35);
+            color: var(--text);
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            font-size: 12px;
         }
 
-        .val-display {
-            color: #007acc;
-            font-weight: bold;
-        }
+        select:focus { outline: none; border-color: var(--accent); }
+
+        .val-display { color: var(--accent); font-weight: 600; }
 
         button {
-            background: #2b9910;
-            color: #fff;
-            border: none;
-            padding: 11px;
-            font-size: 15px;
-            font-weight: bold;
-            border-radius: 6px;
+            background: linear-gradient(to bottom, #3d4a5e, #2d3848);
+            color: #b0c4dc;
+            border: 1px solid #4a6080;
+            padding: 8px 12px;
+            font-size: 13px;
+            font-weight: 600;
+            border-radius: 3px;
             cursor: pointer;
             width: 100%;
-            margin-top: 8px;
-            transition: .2s;
-            font-family: 'Orbitron', sans-serif;
-            letter-spacing: 1.5px;
-            text-transform: uppercase;
+            margin-top: 5px;
+            transition: .15s;
+            font-family: 'Segoe UI', system-ui, sans-serif;
         }
 
-        button:hover {
-            background: #1d660b;
-        }
-
-        button:disabled {
-            background: #555;
-            cursor: not-allowed;
-        }
+        button:hover { background: linear-gradient(to bottom, #485868, #38445a); border-color: #5a7090; }
+        button:disabled { background: #2d3240; border-color: #3a4255; color: #5a6478; cursor: not-allowed; }
 
         #btn-mission {
-            background: #28a1aa;
+            background: linear-gradient(to bottom, #2e6870, #1e5058);
+            border-color: #3a8090;
+            color: #80c8d0;
             margin-top: 4px;
-            font-size: 13px;
-            padding: 9px;
+            font-size: 12px;
+            padding: 7px 10px;
         }
 
-        #btn-mission:hover {
-            background: #10757c;
-        }
+        #btn-mission:hover { background: linear-gradient(to bottom, #387880, #256068); }
 
         #btn-stats {
-            background: #b5cc35;
+            background: linear-gradient(to bottom, #606e1a, #4a5412);
+            border-color: #7a8e20;
+            color: #c0d050;
             margin-top: 4px;
-            font-size: 13px;
-            padding: 9px;
+            font-size: 12px;
+            padding: 7px 10px;
         }
 
-        #btn-stats:hover {
-            background: #7a8a21;
-        }
+        #btn-stats:hover { background: linear-gradient(to bottom, #708020, #58681a); }
 
         .latlon-row {
             display: grid;
@@ -150,163 +184,105 @@
             margin-bottom: 4px;
         }
 
-        .latlon-label {
-            font-size: 11px;
-            color: #888;
-            margin-bottom: 2px;
-        }
+        .latlon-label { font-size: 11px; color: var(--muted); margin-bottom: 2px; }
 
-        /* Draw-region button */
         #draw-btn {
-            background: #6f42c1;
+            background: linear-gradient(to bottom, #4a3475, #362258);
             font-size: 12px;
             padding: 6px 10px;
-            border-radius: 5px;
-            border: none;
-            color: #fff;
+            border-radius: 3px;
+            border: 1px solid #6040a0;
+            color: #c0a0f0;
             cursor: pointer;
             width: 100%;
             margin-top: 4px;
-            transition: .2s;
+            transition: .15s;
         }
 
-        #draw-btn.active {
-            background: #dc3545;
-        }
-
-        #draw-btn:hover {
-            filter: brightness(1.1);
-        }
+        #draw-btn.active { background: linear-gradient(to bottom, #8a1a28, #6a1018); border-color: #b02030; color: #f08090; }
+        #draw-btn:hover { filter: brightness(1.1); }
 
         .status-box {
-            background: #1e1e1e;
-            padding: 10px;
-            border-radius: 5px;
-            border: 1px solid #444;
+            background: rgba(0,0,0,.3);
+            padding: 9px 10px;
+            border-radius: 3px;
+            border: 1px solid var(--border);
             font-size: 12px;
-            color: #aaa;
+            color: var(--muted);
             margin-top: auto;
-            font-family: 'Space Mono', monospace;
+            font-family: 'Share Tech Mono', monospace;
             line-height: 1.6;
         }
 
         /* ---- MAP ---- */
-        #map-container {
-            flex-grow: 1;
-            position: relative;
-        }
-
-        #map {
-            height: 100%;
-            width: 100%;
-        }
+        #map-container { flex-grow: 1; position: relative; }
+        #map { height: 100%; width: 100%; }
 
         /* ---- HUD OVERLAY ---- */
         #hud {
             position: absolute;
-            top: 14px;
-            right: 14px;
+            top: 14px; right: 14px;
             width: 220px;
-            background: rgba(24, 24, 24, .92);
-            border: 1px solid #444;
-            border-radius: 8px;
-            padding: 14px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, .6);
+            background: rgba(30,35,45,.94);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            padding: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,.5);
             z-index: 1000;
             display: none;
             flex-direction: column;
-            gap: 8px;
+            gap: 7px;
         }
 
         #hud h3 {
-            color: #007acc;
-            font-size: 13px;
+            color: var(--accent);
+            font-size: 11px;
             text-align: center;
-            border-bottom: 1px solid #444;
+            border-bottom: 1px solid var(--border);
             padding-bottom: 5px;
-            font-family: 'Orbitron', sans-serif;
-            text-transform: uppercase;
-            letter-spacing: 1.5px;
         }
 
-        .stat-row {
-            display: flex;
-            justify-content: space-between;
-            font-size: 13px;
-        }
-
-        .stat-label {
-            color: #bbb;
-        }
-
-        .stat-value {
-            font-weight: bold;
-            color: #fff;
-        }
+        .stat-row { display: flex; justify-content: space-between; font-size: 12px; }
+        .stat-label { color: var(--muted); }
+        .stat-value { font-weight: 700; color: var(--text); font-family: 'Share Tech Mono', monospace; }
 
         #hud-mission-status {
-            padding: 6px;
+            padding: 5px;
             text-align: center;
-            border-radius: 4px;
-            font-weight: bold;
-            font-size: 12px;
-            background: #333;
-            color: #ccc;
+            border-radius: 3px;
+            font-weight: 700;
+            font-size: 11px;
+            background: #2a3040;
+            color: var(--muted);
         }
 
-        /* Status colour helpers */
-        .status-safe {
-            background: rgba(34, 197, 94, .25) !important;
-            color: #22c55e !important;
-            border: 1px solid #166534;
-        }
-
-        .status-warning {
-            background: rgba(245, 158, 11, .25) !important;
-            color: #f59e0b !important;
-            border: 1px solid #b45309;
-        }
-
-        .status-danger {
-            background: rgba(239, 68, 68, .25) !important;
-            color: #ef4444 !important;
-            border: 1px solid #991b1b;
-        }
-
-        .status-success {
-            background: rgba(34, 197, 94, .25) !important;
-            color: #22c55e !important;
-            border: 1px solid #166534;
-        }
-
-        .status-partial {
-            background: rgba(245, 158, 11, .25) !important;
-            color: #f59e0b !important;
-            border: 1px solid #b45309;
-        }
+        .status-safe    { background: rgba(77,165,94,.2)  !important; color: #6ac87c !important; border: 1px solid #2d6035; }
+        .status-warning { background: rgba(201,163,46,.2) !important; color: #d0aa40 !important; border: 1px solid #806620; }
+        .status-danger  { background: rgba(184,68,68,.2)  !important; color: #d06060 !important; border: 1px solid #6a2020; }
+        .status-success { background: rgba(77,165,94,.2)  !important; color: #6ac87c !important; border: 1px solid #2d6035; }
+        .status-partial { background: rgba(201,163,46,.2) !important; color: #d0aa40 !important; border: 1px solid #806620; }
 
         /* ---- ADVANCED TOOLS ---- */
         .adv-tool-btn {
             width: 100%;
-            padding: 7px 10px;
-            margin-top: 5px;
-            border-radius: 6px;
-            border: 1px solid #555;
-            background: rgba(255,255,255,.06);
-            color: #cdd6f4;
-            font-family: 'Orbitron', sans-serif;
-            font-size: 10px;
-            letter-spacing: 1px;
-            text-transform: uppercase;
+            padding: 6px 10px;
+            margin-top: 4px;
+            border-radius: 3px;
+            border: 1px solid var(--border);
+            background: rgba(255,255,255,.04);
+            color: var(--muted);
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            font-size: 11px;
             cursor: pointer;
-            transition: .2s;
+            transition: .15s;
         }
-        .adv-tool-btn:hover { background: rgba(255,255,255,.13); }
-        .adv-tool-btn.active-geofence { border-color:#22c55e; color:#22c55e; background:rgba(34,197,94,.12); }
-        .adv-tool-btn.active-waypoint { border-color:#f97316; color:#f97316; background:rgba(249,115,22,.12); }
-        .adv-tool-btn.active-agent-spawn { border-color:#3b82f6; color:#3b82f6; background:rgba(59,130,246,.12); }
-        .adv-tool-btn.clear-btn       { border-color:#ef4444; color:#ef4444; }
-        .adv-hint { font-size:10px; color:#666; margin-top:4px; min-height:14px; }
+
+        .adv-tool-btn:hover { background: rgba(255,255,255,.09); color: var(--text); }
+        .adv-tool-btn.active-geofence    { border-color: var(--green); color: #6ac87c; background: rgba(77,165,94,.1); }
+        .adv-tool-btn.active-waypoint    { border-color: #c97040; color: #e0a060; background: rgba(201,112,64,.1); }
+        .adv-tool-btn.active-agent-spawn { border-color: var(--accent); color: #6aabde; background: rgba(77,135,199,.1); }
+        .adv-tool-btn.clear-btn          { border-color: var(--red); color: #d06060; }
+        .adv-hint { font-size: 10px; color: var(--muted); margin-top: 3px; min-height: 13px; }
     </style>
 </head>
 
@@ -377,8 +353,7 @@
         <div class="control-group">
             <h3>Scenario</h3>
             <select id="scenario-select"
-                style="width:100%;margin-bottom:6px;padding:5px;border-radius:5px;border:1px solid #555;background:#1a2030;color:#ccc;">
-                <option value="">-- Load saved scenario --</option>
+                <option value="">Select saved scenario</option>
             </select>
             <div style="display:flex;gap:6px;">
                 <button onclick="loadScenario()" style="flex:1">Load</button>
@@ -386,12 +361,12 @@
             </div>
             <div style="display:flex;gap:6px;margin-top:6px;">
                 <input id="scenario-name" type="text" placeholder="Scenario name…"
-                    style="flex:1;padding:5px;border-radius:5px;border:1px solid #555;background:#1a2030;color:#ccc;">
+                    style="flex:1">
                 <button onclick="saveScenario()" style="flex:1">Save</button>
             </div>
         </div>
 
-        <!-- ▼ ADVANCED MISSION PLANNING ▼ -->
+        <!-- ADVANCED MISSION PLANNING -->
         <div class="control-group">
             <h3>Advanced Planning</h3>
 
@@ -417,7 +392,7 @@
         </div>
 
         <button onclick="sendMapCoordinates()">Deploy Mission</button>
-        <button id="btn-mission" onclick="openMission()" disabled>🗺Live Mission View</button>
+        <button id="btn-mission" onclick="openMission()" disabled>Live Mission View</button>
         <button id="btn-stats" onclick="openStats()" disabled>Open Stats Dashboard</button>
 
         <div class="status-box">
@@ -641,9 +616,19 @@
         // ── Geofence Draw Tool ──
         var _geofencePts = [];   // [[lat,lon],...]
         var _geofenceMarkers = [];
+        var _geofenceMidMarkers = [];
         var _geofenceLine = null;
         var _geofencePoly = null;
         var _geofenceMode = false;
+        var _snapPreviewLine = null;
+        var _snapHighlight = false;
+        var _dragVertexIdx = null;
+        var SNAP_PX = 20;
+
+        function setDrawCircleVisible(visible) {
+            if (!drawCircle) return;
+            drawCircle.setStyle({ opacity: visible ? 1 : 0, fillOpacity: visible ? 0.08 : 0 });
+        }
 
         function toggleGeofenceMode() {
             // Turn off waypoint mode if on
@@ -651,55 +636,177 @@
             _geofenceMode = !_geofenceMode;
             var btn = document.getElementById('btn-geofence');
             if (_geofenceMode) {
+                setDrawCircleVisible(false);
                 btn.classList.add('active-geofence');
-                btn.textContent = 'Stop Drawing (dbl-click closes)';
+                btn.textContent = 'Stop Drawing';
                 map.getContainer().style.cursor = 'crosshair';
                 map.on('click', handleGeofenceClick);
                 map.on('dblclick', closeGeofencePolygon);
-                document.getElementById('geofence-hint').textContent = 'Click to add vertex — double-click to close polygon';
+                map.on('mousemove', handleGeofenceMove);
+                document.getElementById('geofence-hint').textContent = 'Click to add vertex - click near start point to close';
             } else {
+                if (_geofencePts.length < 3) setDrawCircleVisible(true);
                 btn.classList.remove('active-geofence');
                 btn.textContent = 'Draw Geofence Polygon';
                 map.getContainer().style.cursor = '';
+                if (_snapPreviewLine) { map.removeLayer(_snapPreviewLine); _snapPreviewLine = null; }
+                _snapHighlight = false;
+                map.off('mousemove', handleGeofenceMove);
                 map.off('click', handleGeofenceClick);
                 map.off('dblclick', closeGeofencePolygon);
             }
         }
 
+        function handleGeofenceMove(e) {
+            if (_geofencePts.length === 0) return;
+            // Preview line from last vertex to cursor
+            var last = _geofencePts[_geofencePts.length - 1];
+            if (_snapPreviewLine) map.removeLayer(_snapPreviewLine);
+            _snapPreviewLine = L.polyline([last, [e.latlng.lat, e.latlng.lng]], {
+                color: '#22c55e', weight: 1.5, dashArray: '4 4', opacity: 0.55
+            }).addTo(map);
+            // Snap highlight: glow first vertex when cursor is within SNAP_PX
+            if (_geofencePts.length >= 2 && _geofenceMarkers.length > 0) {
+                var firstPt = L.latLng(_geofencePts[0][0], _geofencePts[0][1]);
+                var cPx = map.latLngToLayerPoint(e.latlng);
+                var fPx = map.latLngToLayerPoint(firstPt);
+                var nearFirst = Math.hypot(cPx.x - fPx.x, cPx.y - fPx.y) <= SNAP_PX;
+                if (nearFirst !== _snapHighlight) {
+                    _snapHighlight = nearFirst;
+                    _geofenceMarkers[0].setStyle({
+                        color: nearFirst ? '#fff' : '#22c55e',
+                        fillColor: nearFirst ? '#fff' : '#22c55e',
+                        radius: nearFirst ? 9 : 5,
+                    });
+                    document.getElementById('geofence-hint').textContent = nearFirst
+                        ? 'Click to close polygon'
+                        : `${_geofencePts.length} vertices - click near start to close`;
+                }
+            }
+        }
+
         function handleGeofenceClick(e) {
             L.DomEvent.stopPropagation(e);
+            // Snap-to-close: click within SNAP_PX of first vertex closes the polygon
+            if (_geofencePts.length >= 2) {
+                var firstPt = L.latLng(_geofencePts[0][0], _geofencePts[0][1]);
+                var cPx = map.latLngToLayerPoint(e.latlng);
+                var fPx = map.latLngToLayerPoint(firstPt);
+                if (Math.hypot(cPx.x - fPx.x, cPx.y - fPx.y) <= SNAP_PX) {
+                    closeGeofencePolygon(e);
+                    return;
+                }
+            }
             _geofencePts.push([e.latlng.lat, e.latlng.lng]);
             var dot = L.circleMarker([e.latlng.lat, e.latlng.lng], {
                 radius: 5, color: '#22c55e', fillColor: '#22c55e', fillOpacity: 1, weight: 2
             }).addTo(map);
             _geofenceMarkers.push(dot);
-            // Redraw line
+            // Redraw working line
             if (_geofenceLine) map.removeLayer(_geofenceLine);
             if (_geofencePts.length >= 2)
                 _geofenceLine = L.polyline(_geofencePts, { color: '#22c55e', weight: 2, dashArray: '6 3' }).addTo(map);
-            document.getElementById('geofence-hint').textContent = `${_geofencePts.length} vertices — double-click to close`;
+            document.getElementById('geofence-hint').textContent = `${_geofencePts.length} vertices - click near start to close`;
         }
 
         function closeGeofencePolygon(e) {
             L.DomEvent.stopPropagation(e);
             if (_geofencePts.length < 3) { return; }
-            // Remove preview line, draw filled polygon
-            if (_geofenceLine) { map.removeLayer(_geofenceLine); _geofenceLine = null; }
+            if (_geofenceLine)    { map.removeLayer(_geofenceLine);    _geofenceLine = null; }
+            if (_snapPreviewLine) { map.removeLayer(_snapPreviewLine); _snapPreviewLine = null; }
+            _geofenceMarkers.forEach(m => map.removeLayer(m)); _geofenceMarkers = [];
+            rebuildGeofenceEditUI();
+            document.getElementById('geofence-hint').textContent = `Geofence: ${_geofencePts.length} pts - drag to reshape, right-click vertex to delete`;
+            toggleGeofenceMode();
+        }
+
+        function clearGeofence() {
+            if (_geofenceMode) toggleGeofenceMode();
+            _geofencePts = [];
+            _geofenceMarkers.forEach(m => map.removeLayer(m)); _geofenceMarkers = [];
+            _geofenceMidMarkers.forEach(m => map.removeLayer(m)); _geofenceMidMarkers = [];
+            if (_geofenceLine)    { map.removeLayer(_geofenceLine);    _geofenceLine    = null; }
+            if (_geofencePoly)    { map.removeLayer(_geofencePoly);    _geofencePoly    = null; }
+            if (_snapPreviewLine) { map.removeLayer(_snapPreviewLine); _snapPreviewLine = null; }
+            _snapHighlight = false;
+            setDrawCircleVisible(true);
+            document.getElementById('geofence-hint').textContent = 'No geofence set (agents roam freely)';
+            fetch('http://localhost:8000/api/sim/geofence', { method: 'DELETE' }).catch(() => {});
+        }
+
+        function rebuildGeofenceEditUI() {
+            _geofenceMarkers.forEach(m => map.removeLayer(m)); _geofenceMarkers = [];
+            _geofenceMidMarkers.forEach(m => map.removeLayer(m)); _geofenceMidMarkers = [];
             if (_geofencePoly) map.removeLayer(_geofencePoly);
             _geofencePoly = L.polygon(_geofencePts, {
                 color: '#22c55e', weight: 2, fillColor: '#22c55e', fillOpacity: 0.10, dashArray: '8 4'
             }).addTo(map);
-            document.getElementById('geofence-hint').textContent = `Geofence set: ${_geofencePts.length} pts`;
-            toggleGeofenceMode(); // exit draw mode
+            _geofencePts.forEach(function(pt, i) {
+                var m = L.circleMarker(pt, {
+                    radius: 6, color: '#22c55e', fillColor: '#22c55e', fillOpacity: 1, weight: 2
+                }).addTo(map);
+                m.on('mousedown', function(ev) { L.DomEvent.stopPropagation(ev); startDragVertex(ev, i); });
+                m.on('click', function(ev) { L.DomEvent.stopPropagation(ev); });
+                m.on('contextmenu', function(ev) { L.DomEvent.stopPropagation(ev); deleteVertex(i); });
+                _geofenceMarkers.push(m);
+            });
+            for (var i = 0; i < _geofencePts.length; i++) {
+                (function(idx) {
+                    var j = (idx + 1) % _geofencePts.length;
+                    var mid = L.circleMarker([
+                        (_geofencePts[idx][0] + _geofencePts[j][0]) / 2,
+                        (_geofencePts[idx][1] + _geofencePts[j][1]) / 2
+                    ], { radius: 4, color: '#22c55e', fillColor: '#fff', fillOpacity: 0.6, weight: 1.5 }).addTo(map);
+                    mid.on('click', function(ev) { L.DomEvent.stopPropagation(ev); insertVertex(idx, [ev.latlng.lat, ev.latlng.lng]); });
+                    _geofenceMidMarkers.push(mid);
+                })(i);
+            }
         }
 
-        function clearGeofence() {
-            _geofencePts = [];
-            _geofenceMarkers.forEach(m => map.removeLayer(m)); _geofenceMarkers = [];
-            if (_geofenceLine)  { map.removeLayer(_geofenceLine);  _geofenceLine  = null; }
-            if (_geofencePoly)  { map.removeLayer(_geofencePoly);  _geofencePoly  = null; }
-            document.getElementById('geofence-hint').textContent = 'No geofence set (agents roam freely)';
-            fetch('http://localhost:8000/api/sim/geofence', { method: 'DELETE' }).catch(() => {});
+        function startDragVertex(e, idx) {
+            if (_geofenceMode) return;
+            _dragVertexIdx = idx;
+            map.dragging.disable();
+            map.on('mousemove', onDragVertex);
+            map.on('mouseup', stopDragVertex);
+        }
+
+        function onDragVertex(e) {
+            if (_dragVertexIdx === null) return;
+            var pt = [e.latlng.lat, e.latlng.lng];
+            _geofencePts[_dragVertexIdx] = pt;
+            _geofenceMarkers[_dragVertexIdx].setLatLng(pt);
+            if (_geofencePoly) _geofencePoly.setLatLngs(_geofencePts);
+            for (var i = 0; i < _geofencePts.length; i++) {
+                var j = (i + 1) % _geofencePts.length;
+                if (_geofenceMidMarkers[i]) _geofenceMidMarkers[i].setLatLng([
+                    (_geofencePts[i][0] + _geofencePts[j][0]) / 2,
+                    (_geofencePts[i][1] + _geofencePts[j][1]) / 2
+                ]);
+            }
+        }
+
+        function stopDragVertex() {
+            _dragVertexIdx = null;
+            map.dragging.enable();
+            map.off('mousemove', onDragVertex);
+            map.off('mouseup', stopDragVertex);
+        }
+
+        function insertVertex(afterIdx, pt) {
+            _geofencePts.splice(afterIdx + 1, 0, pt);
+            rebuildGeofenceEditUI();
+            document.getElementById('geofence-hint').textContent = `Geofence: ${_geofencePts.length} pts`;
+        }
+
+        function deleteVertex(idx) {
+            if (_geofencePts.length <= 3) {
+                document.getElementById('geofence-hint').textContent = 'Need at least 3 vertices - use Clear instead';
+                return;
+            }
+            _geofencePts.splice(idx, 1);
+            rebuildGeofenceEditUI();
+            document.getElementById('geofence-hint').textContent = `Geofence: ${_geofencePts.length} pts`;
         }
 
         // ── Waypoint Tool ──
@@ -867,7 +974,7 @@
                 const np = (d.placements || []).length;
                 // Flag custom deploy mode if placements exist
                 window._customDeploy = np > 0;
-                document.getElementById('status').innerText = `Loaded: "${sel}" — ${np ? np + ' placements · custom mode active · ' : ''}click Deploy Mission`;
+                document.getElementById('status').innerText = `Loaded: "${sel}" - ${np ? np + ' placements · custom mode active · ' : ''}click Deploy Mission`;
             } catch (e) { alert('Load failed: ' + e); }
         };
 
@@ -875,7 +982,7 @@
             try {
                 const d = await (await fetch('http://localhost:8000/api/scenario/list')).json();
                 const sel = document.getElementById('scenario-select');
-                sel.innerHTML = '<option value="">-- Load saved scenario --</option>';
+                sel.innerHTML = '<option value="">Select saved scenario</option>';
                 (d.scenarios || []).forEach(s => {
                     const opt = document.createElement('option');
                     opt.value = s.name; opt.textContent = s.name;
@@ -926,7 +1033,8 @@
                     s.className = '';
                     if (data.status?.includes('SUCCESS') && !data.status?.includes('PARTIAL')) { s.innerText = 'MISSION SUCCESS'; s.className = 'status-success'; }
                     else if (data.status?.includes('PARTIAL')) { s.innerText = 'PARTIAL SUCCESS'; s.className = 'status-partial'; }
-                    else if (data.status?.includes('FAIL') || data.status?.includes('CONTACT') || data.status?.includes('STOP')) { s.innerText = 'MISSION FAILED'; s.className = 'status-danger'; }
+                    else if (data.status?.includes('STOP')) { s.innerText = 'STOPPED'; }
+                    else if (data.status?.includes('FAIL') || data.status?.includes('CONTACT')) { s.innerText = 'MISSION FAILED'; s.className = 'status-danger'; }
                     else if (data.escape_mode) { s.innerText = 'EVADING THREAT'; s.className = 'status-warning'; }
                     else if (data.lat) { s.innerText = 'ACTIVE'; s.className = 'status-safe'; }
                     document.getElementById('status').innerText = `Score: ${data.score} | ${data.status}`;

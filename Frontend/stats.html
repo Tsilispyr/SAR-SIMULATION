@@ -38,10 +38,9 @@
         body {
             background: var(--bg);
             color: var(--text);
-            font-family: 'Share Tech Mono', monospace;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
             min-height: 100vh;
             overflow-y: auto;
-            /* scrollable */
         }
 
         /* ── TOP BAR ── */
@@ -49,7 +48,7 @@
             display: flex;
             align-items: center;
             gap: 12px;
-            padding: 12px 20px;
+            padding: 10px 18px;
             background: var(--surface);
             border-bottom: 1px solid var(--border);
             position: sticky;
@@ -59,7 +58,7 @@
         }
 
         header h1 {
-            font-size: 15px;
+            font-size: 13px;
             font-weight: 700;
             color: var(--accent);
             font-family: 'Orbitron', sans-serif;
@@ -68,51 +67,35 @@
         }
 
         #header-elapsed {
-            font-size: 22px;
-            font-weight: 900;
+            font-size: 20px;
+            font-weight: 700;
             color: var(--text);
             font-variant-numeric: tabular-nums;
-            font-family: 'Orbitron', sans-serif;
+            font-family: 'Share Tech Mono', monospace;
         }
 
         #mission-banner {
             font-size: 11px;
             font-weight: 600;
-            padding: 4px 14px;
-            border-radius: 20px;
+            padding: 3px 12px;
+            border-radius: 3px;
             background: var(--surface2);
             border: 1px solid var(--border);
             color: var(--muted);
             transition: .3s;
-            font-family: 'Orbitron', sans-serif;
             text-transform: uppercase;
-            letter-spacing: 1.5px;
+            letter-spacing: 0.5px;
         }
 
-        #mission-banner.active {
-            border-color: var(--green);
-            color: var(--green);
-        }
-
-        #mission-banner.success {
-            border-color: var(--green);
-            color: var(--green);
-        }
-
-        #mission-banner.partial {
-            border-color: var(--yellow);
-            color: var(--yellow);
-        }
-
-        #mission-banner.failed {
-            border-color: var(--red);
-            color: var(--red);
-        }
+        #mission-banner.active  { border-color: var(--green);  color: var(--green); }
+        #mission-banner.success { border-color: var(--green);  color: var(--green); }
+        #mission-banner.partial { border-color: var(--yellow); color: var(--yellow); }
+        #mission-banner.failed  { border-color: var(--red);    color: var(--red); }
 
         .hdr-link {
             font-size: 12px;
             padding: 4px 10px;
-            border-radius: 6px;
+            border-radius: 3px;
             border: 1px solid var(--border);
             background: rgba(255, 255, 255, .06);
             color: var(--text);
@@ -120,22 +103,19 @@
             margin-left: auto;
         }
 
-        .hdr-link:hover {
-            background: rgba(255, 255, 255, .12);
-        }
+        .hdr-link:hover { background: rgba(255, 255, 255, .12); }
 
         /* ── MINI-MAP ── */
         #mini-map-wrap {
             position: fixed;
-            top: 56px;
+            top: 52px;
             right: 14px;
-            width: 280px;
-            height: 200px;
+            width: 270px;
+            height: 195px;
             border: 1px solid var(--border);
-            border-radius: 10px;
+            border-radius: 3px;
             overflow: hidden;
             z-index: 500;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, .4);
         }
 
         #mini-map {
@@ -162,8 +142,8 @@
         /* ── KPI STRIP ── */
         #kpi-row {
             display: flex;
-            gap: 12px;
-            padding: 14px 20px;
+            gap: 10px;
+            padding: 12px 18px;
             overflow-x: auto;
             border-bottom: 1px solid var(--border);
             background: var(--surface);
@@ -173,68 +153,52 @@
         .kpi-card {
             background: var(--surface2);
             border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 12px 16px;
+            border-radius: 3px;
+            padding: 10px 14px;
             flex: 0 0 auto;
-            min-width: 120px;
+            min-width: 110px;
             display: flex;
             flex-direction: column;
             gap: 3px;
-            transition: border-color .3s;
+            transition: border-color .2s;
         }
 
-        .kpi-card:hover {
-            border-color: var(--accent);
-        }
+        .kpi-card:hover { border-color: var(--accent); }
 
         .kpi-label {
-            font-size: 10px;
+            font-size: 9px;
             text-transform: uppercase;
-            letter-spacing: 1.5px;
+            letter-spacing: 0.5px;
             color: var(--muted);
-            font-family: 'Orbitron', sans-serif;
+            font-weight: 600;
         }
 
         .kpi-value {
-            font-size: 26px;
-            font-weight: 900;
+            font-size: 24px;
+            font-weight: 700;
             color: var(--text);
-            font-family: 'Orbitron', sans-serif;
+            font-family: 'Share Tech Mono', monospace;
         }
 
-        .kpi-value.good {
-            color: var(--green);
-        }
+        .kpi-value.good   { color: var(--green); }
+        .kpi-value.warn   { color: var(--yellow); }
+        .kpi-value.danger { color: var(--red); }
+        .kpi-value.accent { color: var(--accent); }
 
-        .kpi-value.warn {
-            color: var(--yellow);
-        }
-
-        .kpi-value.danger {
-            color: var(--red);
-        }
-
-        .kpi-value.accent {
-            color: var(--accent);
-        }
-
-        .kpi-sub {
-            font-size: 10px;
-            color: var(--muted);
-        }
+        .kpi-sub { font-size: 10px; color: var(--muted); }
 
         /* ── RESULT BANNER ── */
         #result-banner {
             display: none;
             text-align: center;
-            font-size: 18px;
-            font-weight: 900;
-            padding: 16px 24px;
-            border-radius: 10px;
-            border: 2px solid;
-            margin: 14px 20px 0;
+            font-size: 16px;
+            font-weight: 700;
+            padding: 13px 22px;
+            border-radius: 3px;
+            border: 1px solid;
+            margin: 12px 18px 0;
             animation: pulse 2s infinite;
-            letter-spacing: 2px;
+            letter-spacing: 1px;
             font-family: 'Orbitron', sans-serif;
             text-transform: uppercase;
         }
@@ -275,28 +239,27 @@
             grid-template-columns: 1fr 1fr 1fr;
             gap: 14px;
             padding: 14px 20px;
-            /* Scroll the whole page naturally — no fixed height */
+            /* Scroll the whole page naturally - no fixed height */
         }
 
         .panel-card {
             background: var(--surface);
             border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 14px 16px;
+            border-radius: 3px;
+            padding: 12px 14px;
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 8px;
             min-width: 0;
-            /* allow grid to shrink */
-            min-height: 340px;
+            min-height: 320px;
         }
 
         .panel-card h3 {
-            font-size: 12px;
+            font-size: 10px;
             font-weight: 600;
             color: var(--muted);
             text-transform: uppercase;
-            letter-spacing: .8px;
+            letter-spacing: 0.5px;
             flex-shrink: 0;
         }
 
@@ -338,12 +301,13 @@
         .log-entry {
             background: var(--surface2);
             border: 1px solid var(--border);
-            border-radius: 5px;
-            padding: 7px 9px;
+            border-radius: 2px;
+            padding: 6px 9px;
             font-size: 11px;
             line-height: 1.4;
             color: var(--text);
             flex-shrink: 0;
+            font-family: 'Share Tech Mono', monospace;
         }
 
         .log-entry .log-time {
@@ -352,19 +316,10 @@
             margin-bottom: 2px;
         }
 
-        .log-entry.escape {
-            border-left: 3px solid var(--red);
-        }
+        .log-entry.escape { }
+        .log-entry.brave { }
+        .log-entry.normal { }
 
-        .log-entry.brave {
-            border-left: 3px solid var(--yellow);
-        }
-
-        .log-entry.normal {
-            border-left: 3px solid var(--accent);
-        }
-
-        /* refresh badge */
         #refresh-badge {
             position: fixed;
             bottom: 14px;
@@ -374,7 +329,7 @@
             color: var(--muted);
             font-size: 10px;
             padding: 4px 10px;
-            border-radius: 20px;
+            border-radius: 3px;
             z-index: 10;
         }
 
@@ -407,30 +362,15 @@
             display: flex;
             justify-content: space-between;
             font-size: 12px;
-            border-bottom: 1px solid rgba(0, 0, 0, .12);
+            border-bottom: 1px solid var(--border);
             padding-bottom: 4px;
         }
 
-        .hs-label {
-            color: var(--muted);
-        }
-
-        .hs-val {
-            font-weight: 700;
-            color: var(--text);
-        }
-
-        .hs-val.c-green {
-            color: var(--green);
-        }
-
-        .hs-val.c-yellow {
-            color: var(--yellow);
-        }
-
-        .hs-val.c-red {
-            color: var(--red);
-        }
+        .hs-label { color: var(--muted); }
+        .hs-val   { font-weight: 600; color: var(--text); font-family: 'Share Tech Mono', monospace; }
+        .hs-val.c-green  { color: var(--green); }
+        .hs-val.c-yellow { color: var(--yellow); }
+        .hs-val.c-red    { color: var(--red); }
 
         #recent-list {
             margin-top: 10px;
@@ -444,24 +384,16 @@
         .rec-entry {
             font-size: 10px;
             padding: 3px 7px;
-            border-radius: 4px;
-            border-left: 3px solid var(--border);
+            border-radius: 3px;
+            border: 1px solid var(--border);
             background: var(--surface2);
             display: flex;
             justify-content: space-between;
         }
 
-        .rec-entry.success {
-            border-color: var(--green);
-        }
-
-        .rec-entry.partial {
-            border-color: var(--yellow);
-        }
-
-        .rec-entry.failed {
-            border-color: var(--red);
-        }
+        .rec-entry.success { border-color: var(--green); }
+        .rec-entry.partial { border-color: var(--yellow); }
+        .rec-entry.failed  { border-color: var(--red); }
 
         /* Responsive: stack on small screens */
         @media (max-width: 900px) {
@@ -509,7 +441,7 @@
         </div>
         <div class="kpi-card">
             <span class="kpi-label">AI Mode</span>
-            <span class="kpi-value good" id="kpi-mode" style="font-size:18px;">—</span>
+            <span class="kpi-value good" id="kpi-mode" style="font-size:18px;">-</span>
             <span class="kpi-sub">autopilot</span>
         </div>
         <div class="kpi-card">
@@ -548,7 +480,7 @@
             <h3>AI Decision Log</h3>
             <div id="log-list">
                 <div class="log-entry normal">
-                    <div class="log-time">—</div>
+                    <div class="log-time">-</div>
                     Waiting for mission start...
                 </div>
             </div>
@@ -564,27 +496,27 @@
                 <div id="history-stats">
                     <div class="hs-row">
                         <span class="hs-label">Total Missions</span>
-                        <span class="hs-val" id="hs-total">—</span>
+                        <span class="hs-val" id="hs-total">-</span>
                     </div>
                     <div class="hs-row">
                         <span class="hs-label">Success</span>
-                        <span class="hs-val c-green" id="hs-success">—</span>
+                        <span class="hs-val c-green" id="hs-success">-</span>
                     </div>
                     <div class="hs-row">
                         <span class="hs-label">Partial</span>
-                        <span class="hs-val c-yellow" id="hs-partial">—</span>
+                        <span class="hs-val c-yellow" id="hs-partial">-</span>
                     </div>
                     <div class="hs-row">
                         <span class="hs-label">Failed</span>
-                        <span class="hs-val c-red" id="hs-failed">—</span>
+                        <span class="hs-val c-red" id="hs-failed">-</span>
                     </div>
                     <div class="hs-row">
                         <span class="hs-label">Best Score</span>
-                        <span class="hs-val" id="hs-best">—</span>
+                        <span class="hs-val" id="hs-best">-</span>
                     </div>
                     <div class="hs-row">
                         <span class="hs-label">Avg Score</span>
-                        <span class="hs-val" id="hs-avg">—</span>
+                        <span class="hs-val" id="hs-avg">-</span>
                     </div>
                     <h3 style="margin-top:10px;">Recent Missions</h3>
                     <div id="recent-list"></div>
@@ -597,11 +529,11 @@
 
     <!-- Score Formula Panel -->
     <div id="formula-card"
-        style="margin:16px 310px 0 14px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 18px;">
+        style="margin:14px 310px 14px 14px;background:var(--surface);border:1px solid var(--border);border-radius:3px;padding:12px 16px;">
         <h3
-            style="font-family:'Orbitron',sans-serif;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">
+            style="font-size:10px;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">
             Score Formula</h3>
-        <pre style="font-size:11px;line-height:1.8;color:var(--text);white-space:pre-wrap;">Score(t)  =  Σ (+50 per target collected)
+        <pre style="font-size:11px;line-height:1.8;color:var(--text);white-space:pre-wrap;font-family:'Share Tech Mono',monospace;">Score(t)  =  Σ (+50 per target collected)
           −  Σ (terrain_penalty per road segment traversed)
           −  100 per enemy contact (per agent)
 
@@ -793,7 +725,7 @@ Score gradient interpretation:
                     addLogEntry(fmtTime(elapsed), data.last_decision);
                 }
 
-                // Charts — always update on each poll to be real-time
+                // Charts - always update on each poll to be real-time
                 if (data.history && data.history.length > 0) {
                     const MAX = 80;
                     const src = data.history;
@@ -938,12 +870,12 @@ Score gradient interpretation:
                 const d = await (await fetch('http://127.0.0.1:8000/api/stats/summary')).json();
                 const total = d.total || 0;
                 const pct = (n) => total > 0 ? ` | ${Math.round(n / total * 100)}%` : '';
-                document.getElementById('hs-total').textContent = total || '—';
-                document.getElementById('hs-success').textContent = total ? `${d.success}${pct(d.success)}` : '—';
-                document.getElementById('hs-partial').textContent = total ? `${d.partial}${pct(d.partial)}` : '—';
-                document.getElementById('hs-failed').textContent = total ? `${d.failed}${pct(d.failed)}` : '—';
-                document.getElementById('hs-best').textContent = d.best_score ?? '—';
-                document.getElementById('hs-avg').textContent = d.avg_score ?? '—';
+                document.getElementById('hs-total').textContent = total || '-';
+                document.getElementById('hs-success').textContent = total ? `${d.success}${pct(d.success)}` : '-';
+                document.getElementById('hs-partial').textContent = total ? `${d.partial}${pct(d.partial)}` : '-';
+                document.getElementById('hs-failed').textContent = total ? `${d.failed}${pct(d.failed)}` : '-';
+                document.getElementById('hs-best').textContent = d.best_score ?? '-';
+                document.getElementById('hs-avg').textContent = d.avg_score ?? '-';
 
                 pieChart.data.datasets[0].data = [d.success || 0, d.partial || 0, d.failed || 0];
                 pieChart.update();
