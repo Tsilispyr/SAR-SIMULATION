@@ -54,11 +54,30 @@ def build_run_queue(n_runs: int) -> list:
     return queue
 
 
-def api(host, method, path, timeout=30, **kwargs):
+def api(host, method, path, timeout=30, retries=2, **kwargs):
     fn = getattr(requests, method)
-    resp = fn(f"{host}{path}", timeout=timeout, **kwargs)
-    resp.raise_for_status()
-    return resp.json()
+    for attempt in range(1, retries + 1):
+        try:
+            resp = fn(f"{host}{path}", timeout=timeout, **kwargs)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            if attempt < retries:
+                time.sleep(5)
+            else:
+                raise
+
+
+def wait_for_backend(host: str, max_wait: int = 60):
+    """Block until backend responds or give up after max_wait seconds."""
+    t0 = time.time()
+    while time.time() - t0 < max_wait:
+        try:
+            requests.get(f"{host}/api/sim/state", timeout=5)
+            return True
+        except Exception:
+            time.sleep(5)
+    return False
 
 
 def load_map_with_retry(host: str, params: dict, retries: int = 3) -> bool:
@@ -83,8 +102,14 @@ def run_mission(host: str, run_idx: int, preset: dict) -> dict:
     # Entity placement is already random so topology variation comes from that, not map center.
     lat, lon = BASE_LAT, BASE_LON
 
-    # 1. Clear old state
-    api(host, "get", "/api/sim/clear")
+    # 1. Clear old state — use longer timeout; backend may be sluggish after heavy missions
+    try:
+        api(host, "get", "/api/sim/clear", timeout=60)
+    except Exception:
+        print(f"    backend unresponsive, waiting up to 60s...")
+        if not wait_for_backend(host, max_wait=60):
+            return {"run": run_idx, "result": "map_error", "preset": preset["label"]}
+        api(host, "get", "/api/sim/clear", timeout=60)
     time.sleep(SETTLE_DELAY)
 
     # 2. Load map + spawn entities (retry on Overpass timeout)
@@ -267,6 +292,8 @@ def main():
                         help="Delete existing stats/*.json before running")
     parser.add_argument("--out",       default="batch_results.json",
                         help="Output file for raw results")
+    parser.add_argument("--resume",    action="store_true",
+                        help="Resume from existing batch_results.json, skip completed runs")
     args = parser.parse_args()
 
     if args.clear_old:
@@ -287,15 +314,37 @@ def main():
 
     queue = build_run_queue(args.runs)
 
-    tier_counts = {p["label"]: queue.count(p) for p in PRESETS}
+    # Resume: load existing results and skip already-completed runs
+    results = []
+    start_from = 0
+    if args.resume and os.path.exists(args.out):
+        try:
+            with open(args.out) as f:
+                prev = json.load(f)
+            results = prev.get("results", [])
+            start_from = len(results)
+            print(f"Resuming from run {start_from + 1} ({start_from} already completed)")
+        except Exception as e:
+            print(f"Could not load previous results: {e}")
+
+    queue = queue[start_from:]
+
+    tier_counts = {p["label"]: build_run_queue(args.runs).count(p) for p in PRESETS}
     print(f"\nSAR Batch Test - {args.runs} missions at {SIM_SPEED}x speed")
     print(f"Tier distribution: {tier_counts}")
     print(f"Host: {args.host}   Started: {datetime.now().strftime('%H:%M:%S')}\n")
 
-    results = []
-    for i, preset in enumerate(queue, start=1):
+    def save_incremental(results, out_path):
+        s = summarise(results)
+        out = {"generated": datetime.now().isoformat(), "runs": args.runs,
+               "summary": s or {}, "results": results}
+        with open(out_path, "w") as f:
+            json.dump(out, f, indent=2)
+
+    for i, preset in enumerate(queue, start=start_from + 1):
         row = run_mission(args.host, i, preset)
         results.append(row)
+        save_incremental(results, args.out)  # save after every run
         # Running tally every 10 runs
         if i % 10 == 0:
             s = summarise(results)

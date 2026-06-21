@@ -45,11 +45,5 @@ implementation_plan.md
 README-SAR.md
 HRF-Poster-Template(1).pptx
 
-# Batch test outputs (added after evaluation runs complete)
-batch_results.json
+# Batch test intermediate outputs
 batch_results.csv
-SAR_Report_GR.md
-results_pie.png
-results_by_difficulty.png
-results_score_dist.png
-results_rate_vs_difficulty.png
