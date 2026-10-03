@@ -745,6 +745,10 @@
         let enemyRings = {};
         let targetMarkers = {};
         let lastAgentCount = 0;
+        // UAV layer
+        let uavMarker = null;
+        let uavRing   = null;
+        let uavIntelMarkers = [];
 
         // Mission control state
         let mcState = 'idle'; // idle | running | paused | stopped | game_over
@@ -1405,10 +1409,82 @@
         }
         loadGeofenceOverlay();
 
+        // ── UAV polling ──
+        async function pollUAV() {
+            try {
+                const d = await (await fetch('http://127.0.0.1:8000/api/sim/uav')).json();
+                if (!d.active || d.lat == null) {
+                    if (uavMarker) { uavMarker.remove(); uavMarker = null; }
+                    if (uavRing)   { uavRing.remove();   uavRing   = null; }
+                    uavIntelMarkers.forEach(m => m.remove());
+                    uavIntelMarkers = [];
+                    return;
+                }
+
+                const lngLat = [d.lon, d.lat];
+
+                // UAV body marker
+                if (!uavMarker) {
+                    const el = document.createElement('div');
+                    el.style.cssText = `
+                        width:22px;height:22px;border-radius:50%;
+                        background:rgba(255,220,0,0.95);border:2.5px solid #fff;
+                        box-shadow:0 0 10px rgba(255,220,0,0.7);
+                        display:flex;align-items:center;justify-content:center;
+                        font-size:12px;line-height:1;`;
+                    el.textContent = '✈';
+                    uavMarker = new maplibregl.Marker({ element: el }).setLngLat(lngLat).addTo(map);
+                } else {
+                    uavMarker.setLngLat(lngLat);
+                }
+
+                // UAV detection circle (Leaflet-style using a GeoJSON circle approximation)
+                if (!uavRing) {
+                    // Use a simple SVG circle overlay via a GeoJSON source
+                    if (!map.getSource('uav-ring')) {
+                        map.addSource('uav-ring', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+                        map.addLayer({ id: 'uav-ring-fill', type: 'fill', source: 'uav-ring',
+                            paint: { 'fill-color': 'rgba(255,220,0,0.06)', 'fill-outline-color': 'rgba(255,220,0,0.5)' } });
+                        map.addLayer({ id: 'uav-ring-line', type: 'line', source: 'uav-ring',
+                            paint: { 'line-color': 'rgba(255,220,0,0.6)', 'line-width': 1.5, 'line-dasharray': [4, 3] } });
+                    }
+                    uavRing = true;
+                }
+                // Update ring GeoJSON (approximate circle with 48 points)
+                const R = d.detect_r / 111320; // approx degrees lat
+                const pts = Array.from({ length: 49 }, (_, i) => {
+                    const a = (i / 48) * 2 * Math.PI;
+                    return [d.lon + (R / Math.cos(d.lat * Math.PI / 180)) * Math.cos(a),
+                            d.lat + R * Math.sin(a)];
+                });
+                map.getSource('uav-ring').setData({
+                    type: 'FeatureCollection',
+                    features: [{ type: 'Feature', geometry: { type: 'Polygon', coordinates: [pts] } }]
+                });
+
+                // Intel markers (stale enemy positions UAV has detected)
+                uavIntelMarkers.forEach(m => m.remove());
+                uavIntelMarkers = [];
+                for (const item of (d.intel || [])) {
+                    if (!item.lat || !item.lon) continue;
+                    const opacity = Math.max(0.15, 1 - item.ticks_ago / 90);
+                    const el2 = document.createElement('div');
+                    el2.style.cssText = `
+                        width:10px;height:10px;border-radius:50%;
+                        background:rgba(255,100,50,${opacity.toFixed(2)});
+                        border:1.5px solid rgba(255,80,30,0.8);`;
+                    el2.title = `UAV intel: enemy ${item.enemy_id} (${item.ticks_ago} ticks ago)`;
+                    uavIntelMarkers.push(new maplibregl.Marker({ element: el2 })
+                        .setLngLat([item.lon || d.lon, item.lat || d.lat]).addTo(map));
+                }
+            } catch (e) { /* UAV polling non-critical */ }
+        }
+
         poll();
         // Track intervals so we can freeze them on game_over
         _pollIntervals.push(setInterval(poll, 200));
         _pollIntervals.push(setInterval(pollStats, 1000));
+        _pollIntervals.push(setInterval(pollUAV, 400));
     </script>
 </body>
 

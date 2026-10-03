@@ -25,46 +25,52 @@ def densify_path(path_coords, step_meters=2.0):
     new_path.append(path_coords[-1])
     return new_path
 
-def build_penalized_graph(G, enemies, geofence=None, cx=0.0, cy=0.0):
+def build_penalized_graph(G, enemies, geofence=None, cx=0.0, cy=0.0,
+                          uav_threats=None, current_tick=0, tau=30.0):
     """Return a copy of G with tiered enemy risk penalties and geofence penalties applied.
-    Uses cKDTree spatial indexing to avoid brute-force O(E x K) distance checks."""
+    Uses cKDTree spatial indexing to avoid brute-force O(E x K) distance checks.
+
+    uav_threats: dict {enemy_id: (ex_centered, ey_centered, tick_seen)} from UAV detections.
+    Applies a temporal-decay penalty for UAV-spotted threats:
+        W(d, t) = W_base * exp(-t / tau) * max(0, 1 - d / r_influence)
+    where t = ticks since detection, tau = decay constant (ticks), r_influence grows with t
+    as the enemy may have drifted from its last known position.
+    """
     from scipy.spatial import cKDTree
 
     U = G.to_undirected() if G.is_directed() else G.copy()
 
-    # Pre-compute edge data for spatial queries
     edge_list = list(U.edges(keys=True, data=True))
     if not edge_list:
         return U
 
-    # Build midpoint array for cKDTree (only once per call)
-    edge_mids = np.empty((len(edge_list), 2), dtype=np.float64)
+    edge_mids     = np.empty((len(edge_list), 2), dtype=np.float64)
     edge_u_coords = np.empty((len(edge_list), 2), dtype=np.float64)
     edge_v_coords = np.empty((len(edge_list), 2), dtype=np.float64)
     for idx, (u, v, k, data) in enumerate(edge_list):
         ux, uy = U.nodes[u]['x'], U.nodes[u]['y']
         vx, vy = U.nodes[v]['x'], U.nodes[v]['y']
-        edge_mids[idx] = ((ux + vx) / 2.0, (uy + vy) / 2.0)
+        edge_mids[idx]     = ((ux + vx) / 2.0, (uy + vy) / 2.0)
         edge_u_coords[idx] = (ux, uy)
         edge_v_coords[idx] = (vx, vy)
 
-    # Geofence: massive penalty if edge midpoints are outside polygon (projected)
+    mid_tree = cKDTree(edge_mids) if (enemies or uav_threats) and len(edge_list) > 0 else None
+
+    # Geofence: massive penalty outside polygon
     if geofence is not None:
         for idx, (u, v, k, data) in enumerate(edge_list):
             mid_x, mid_y = edge_mids[idx]
             if not geofence.contains(Point(mid_x, mid_y)):
                 data['length'] = data.get('length', 1.0) + 6000.0
 
-    # Enemy proximity penalties using spatial indexing
-    if enemies and len(edge_list) > 0:
-        mid_tree = cKDTree(edge_mids)
+    # Direct-sighting enemy proximity penalties (tiered rings)
+    if enemies and mid_tree is not None:
         for enemy in enemies:
             ex, ey     = enemy.x + cx, enemy.y + cy
             radius     = enemy.detection_radius
             ext_radius = radius + 30.0
             aggr_mult  = 1.5 if enemy.type == "aggressive" else 1.0
 
-            # Query only edges whose midpoint is within ext_radius (outer influence ring)
             nearby_indices = mid_tree.query_ball_point([ex, ey], ext_radius)
             for idx in nearby_indices:
                 u, v, k, data = edge_list[idx]
@@ -84,4 +90,33 @@ def build_penalized_graph(G, enemies, geofence=None, cx=0.0, cy=0.0):
                 else:                            penalty = 0.0
                 if penalty > 0:
                     data['length'] = data.get('length', 1.0) + penalty * aggr_mult
+
+    # UAV temporal-decay threat penalties
+    # Peak penalty W_BASE decays as exp(-t/tau). Influence radius grows as enemy may drift
+    # at ~3 m/tick from its last known position (conservative upper bound on enemy speed).
+    # This models uncertainty: a fresh sighting yields high, sharp penalty;
+    # a stale sighting yields lower, spatially spread-out penalty.
+    W_BASE         = 1200.0   # peak penalty for a just-detected UAV threat
+    DRIFT_RATE     = 3.0      # m/tick - max expected enemy movement
+    MIN_DECAY      = 0.05     # skip entries whose strength fell below 5%
+
+    if uav_threats and mid_tree is not None:
+        for enemy_id, (uex, uey, tick_seen) in uav_threats.items():
+            t = max(0, current_tick - tick_seen)
+            decay = math.exp(-t / max(tau, 1.0))
+            if decay < MIN_DECAY:
+                continue
+            r_influence = max(60.0, DRIFT_RATE * t)
+            w_peak      = W_BASE * decay
+            ex_abs      = uex + cx
+            ey_abs      = uey + cy
+
+            nearby = mid_tree.query_ball_point([ex_abs, ey_abs], r_influence)
+            for idx in nearby:
+                _, _, _, data = edge_list[idx]
+                d   = math.hypot(edge_mids[idx][0] - ex_abs, edge_mids[idx][1] - ey_abs)
+                pen = w_peak * max(0.0, 1.0 - d / r_influence)
+                if pen > 1.0:
+                    data['length'] = data.get('length', 1.0) + pen
+
     return U

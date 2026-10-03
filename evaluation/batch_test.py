@@ -9,9 +9,10 @@ Tiers (deterministic distribution across N runs):
   very_hard  - 5 patrol, 4 aggr, 7 targets, radius 1500m  (20%)
 
 Usage:
-  python batch_test.py                        # 50 runs
-  python batch_test.py --runs 50 --clear-old  # wipe old stats first
-  python batch_test.py --host http://localhost:8000
+  python batch_test.py                                     # 50 runs, no UAV
+  python batch_test.py --runs 30 --uav-strategy lawnmower  # 30 runs with UAV
+  python batch_test.py --runs 30 --uav-strategy none       # explicit baseline
+  Strategies: none | lawnmower | threat_informed | target_informed | hybrid
 """
 import requests
 import time
@@ -24,10 +25,10 @@ from datetime import datetime
 
 # == Config =================
 DEFAULT_HOST    = "http://localhost:8000"
-MAX_WALL_SECS   = 360     # wall-clock timeout per mission (8x × 360s = 2880 sim-sec)
+MAX_WALL_SECS   = 720     # wall-clock timeout per mission (4x × 720s = 2880 sim-sec)
 POLL_INTERVAL   = 0.15    # seconds between /api/stats polls
 SETTLE_DELAY    = 1.2     # pause after /api/sim/clear before loading map
-SIM_SPEED       = 8.0     # DO NOT raise above 16x - contact detection breaks at >5x
+SIM_SPEED       = 4.0     # keep at or below 5x — enemy contact detection breaks above that
 
 # == Difficulty tiers ===================
 # Fractions must sum to 1.0; deterministically spread across the run list.
@@ -97,7 +98,7 @@ def load_map_with_retry(host: str, params: dict, retries: int = 3) -> bool:
     return False
 
 
-def run_mission(host: str, run_idx: int, preset: dict) -> dict:
+def run_mission(host: str, run_idx: int, preset: dict, uav_strategy: str = "none") -> dict:
     # Fixed Athens center - no jitter so OSMnx cache is always hit after first download.
     # Entity placement is already random so topology variation comes from that, not map center.
     lat, lon = BASE_LAT, BASE_LON
@@ -108,7 +109,8 @@ def run_mission(host: str, run_idx: int, preset: dict) -> dict:
     except Exception:
         print(f"    backend unresponsive, waiting up to 60s...")
         if not wait_for_backend(host, max_wait=60):
-            return {"run": run_idx, "result": "map_error", "preset": preset["label"]}
+            return {"run": run_idx, "result": "map_error", "preset": preset["label"],
+                    "uav_strategy": uav_strategy}
         api(host, "get", "/api/sim/clear", timeout=60)
     time.sleep(SETTLE_DELAY)
 
@@ -125,10 +127,12 @@ def run_mission(host: str, run_idx: int, preset: dict) -> dict:
         "detection_radius": round(random.uniform(40.0, 60.0), 1),
         "n_agents": 1,
         "mode": "random",
+        "uav_strategy": uav_strategy,
     }
     if not load_map_with_retry(host, params):
         print(f"  [✗] RUN {run_idx:3d} | map_error | preset={preset['label']}")
-        return {"run": run_idx, "result": "map_error", "preset": preset["label"]}
+        return {"run": run_idx, "result": "map_error", "preset": preset["label"],
+                "uav_strategy": uav_strategy}
 
     time.sleep(0.3)
 
@@ -171,6 +175,7 @@ def run_mission(host: str, run_idx: int, preset: dict) -> dict:
               f"targets {targets_collected}/{targets_total} | {preset['label']:<9} | wall={wall_time:.0f}s")
         return {
             "run": run_idx, "result": "failed", "preset": preset["label"],
+            "uav_strategy": uav_strategy,
             "score": score, "sim_elapsed_s": MAX_WALL_SECS * 8,
             "wall_sec": wall_time,
             "targets_collected": targets_collected, "targets_total": targets_total,
@@ -203,6 +208,7 @@ def run_mission(host: str, run_idx: int, preset: dict) -> dict:
         "run":               run_idx,
         "result":            result,
         "preset":            preset["label"],
+        "uav_strategy":      uav_strategy,
         "score":             score,
         "sim_elapsed_s":     elapsed,
         "wall_sec":          wall_time,
@@ -286,15 +292,22 @@ def print_summary(s: dict):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--runs",      type=int, default=50)
-    parser.add_argument("--host",      default=DEFAULT_HOST)
-    parser.add_argument("--clear-old", action="store_true",
+    parser.add_argument("--runs",         type=int, default=50)
+    parser.add_argument("--host",         default=DEFAULT_HOST)
+    parser.add_argument("--clear-old",    action="store_true",
                         help="Delete existing stats/*.json before running")
-    parser.add_argument("--out",       default="batch_results.json",
-                        help="Output file for raw results")
-    parser.add_argument("--resume",    action="store_true",
-                        help="Resume from existing batch_results.json, skip completed runs")
+    parser.add_argument("--out",          default=None,
+                        help="Output file for raw results (default: batch_results_<strategy>.json)")
+    parser.add_argument("--resume",       action="store_true",
+                        help="Resume from existing results file, skip completed runs")
+    parser.add_argument("--uav-strategy", default="none",
+                        choices=["none", "lawnmower", "threat_informed",
+                                 "target_informed", "hybrid"],
+                        help="UAV coverage strategy (none=baseline)")
     args = parser.parse_args()
+
+    if args.out is None:
+        args.out = f"batch_results_{args.uav_strategy}.json"
 
     if args.clear_old:
         stats_dir = os.path.join(os.path.dirname(__file__), "Backend", "data", "stats")
@@ -330,19 +343,20 @@ def main():
     queue = queue[start_from:]
 
     tier_counts = {p["label"]: build_run_queue(args.runs).count(p) for p in PRESETS}
-    print(f"\nSAR Batch Test - {args.runs} missions at {SIM_SPEED}x speed")
+    print(f"\nSAR Batch Test - {args.runs} missions at {SIM_SPEED}x speed (max safe: 5x)")
+    print(f"UAV strategy: {args.uav_strategy}")
     print(f"Tier distribution: {tier_counts}")
     print(f"Host: {args.host}   Started: {datetime.now().strftime('%H:%M:%S')}\n")
 
     def save_incremental(results, out_path):
         s = summarise(results)
         out = {"generated": datetime.now().isoformat(), "runs": args.runs,
-               "summary": s or {}, "results": results}
+               "uav_strategy": args.uav_strategy, "summary": s or {}, "results": results}
         with open(out_path, "w") as f:
             json.dump(out, f, indent=2)
 
     for i, preset in enumerate(queue, start=start_from + 1):
-        row = run_mission(args.host, i, preset)
+        row = run_mission(args.host, i, preset, uav_strategy=args.uav_strategy)
         results.append(row)
         save_incremental(results, args.out)  # save after every run
         # Running tally every 10 runs
@@ -360,10 +374,11 @@ def main():
 
     # Save raw JSON
     out = {
-        "generated": datetime.now().isoformat(),
-        "runs": args.runs,
-        "summary": summary,
-        "results": results,
+        "generated":    datetime.now().isoformat(),
+        "runs":         args.runs,
+        "uav_strategy": args.uav_strategy,
+        "summary":      summary,
+        "results":      results,
     }
     with open(args.out, "w") as f:
         json.dump(out, f, indent=2)
@@ -372,8 +387,8 @@ def main():
     # Save CSV for easy import into charts
     csv_path = args.out.replace(".json", ".csv")
     if results:
-        keys = ["run", "result", "preset", "score", "sim_elapsed_s", "wall_sec",
-                "targets_collected", "targets_total", "escape_events",
+        keys = ["run", "result", "preset", "uav_strategy", "score", "sim_elapsed_s",
+                "wall_sec", "targets_collected", "targets_total", "escape_events",
                 "n_patrol", "n_aggr", "radius"]
         with open(csv_path, "w", newline="") as f:
             w = csv.DictWriter(f, fieldnames=keys, extrasaction="ignore")

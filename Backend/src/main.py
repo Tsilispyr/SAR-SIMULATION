@@ -479,6 +479,122 @@ def save_stats_to_disk(stats_history, score, status, n_agents=1):
 
 
 # ---------------------------------------------------------------------------
+#  UAV AGENT
+# ---------------------------------------------------------------------------
+
+class UAVAgent:
+    """Autonomous aerial agent that sweeps the mission area and feeds
+    enemy position intelligence to ground UGV agents via uav_intelligence."""
+
+    SPEED    = 20.0   # m/s aerial speed
+    DETECT_R = 180.0  # m top-down detection radius
+
+    def __init__(self, strategy: str, mission_radius: float):
+        self.strategy  = strategy
+        self.x         = 0.0   # centered coords (same frame as agents/enemies)
+        self.y         = 0.0
+        self.heading   = 0.0
+        self._tick     = 0
+        self.detect_r  = self.DETECT_R
+        self._mission_r = mission_radius
+        self._wps: list[tuple[float, float]] = []  # current waypoint queue
+        if strategy == 'lawnmower':
+            self._wps = self._gen_lawnmower()
+        # For threat/target/hybrid: waypoints are computed dynamically
+
+    # ── Waypoint generators ─────────────────────────────────────────────────
+
+    def _gen_lawnmower(self) -> list[tuple[float, float]]:
+        """Parallel-strip boustrophedon sweep over the mission bounding square."""
+        r = self._mission_r * 0.95
+        strip_gap = self.DETECT_R * 1.35   # ~25 % overlap between strips
+        y, going_right, strips = -r, True, []
+        while y <= r + strip_gap:
+            strips += [((-r, y), (r, y)) if going_right else ((r, y), (-r, y))]
+            y += strip_gap
+            going_right = not going_right
+        wps = []
+        for (x0, y0), (x1, y1) in strips:
+            wps += [(x0, y0), (x1, y1)]
+        return wps
+
+    def _threat_wp(self, uav_intelligence: dict) -> tuple[float, float]:
+        """Fly toward the most stale (least recently seen) known enemy position."""
+        if not uav_intelligence:
+            return self._lawnmower_step()
+        oldest = min(uav_intelligence.values(), key=lambda v: v[2])
+        return (oldest[0], oldest[1])   # centered coords stored in intel
+
+    def _target_wp(self, game_state) -> tuple[float, float]:
+        """Fly toward the midpoint between UGV and its next uncollected target."""
+        targets = game_state.targets
+        agents  = game_state.agents
+        if not targets:
+            return self._lawnmower_step()
+        # Centroid of remaining targets
+        tx = sum(t['x'] for t in targets) / len(targets)
+        ty = sum(t['y'] for t in targets) / len(targets)
+        if agents:
+            ag = min(agents, key=lambda a: not a.active or True)
+            tx = (tx + ag.robot_x) / 2.0
+            ty = (ty + ag.robot_y) / 2.0
+        return (tx, ty)
+
+    def _lawnmower_step(self) -> tuple[float, float]:
+        """Advance lawnmower; restart when complete."""
+        if not self._wps:
+            self._wps = self._gen_lawnmower()
+        wp = self._wps[0]
+        if math.hypot(wp[0] - self.x, wp[1] - self.y) < 8.0:
+            self._wps.pop(0)
+            if not self._wps:
+                self._wps = self._gen_lawnmower()
+        return self._wps[0] if self._wps else (0.0, 0.0)
+
+    # ── Main update ─────────────────────────────────────────────────────────
+
+    def update(self, game_state, delta_t: float) -> dict:
+        """Move UAV one tick; return {enemy_id: (ex_c, ey_c, tick)} for all
+        enemies whose centered position falls within the detection radius."""
+        self._tick += 1
+
+        # Choose target waypoint based on strategy
+        if self.strategy == 'lawnmower':
+            tx, ty = self._lawnmower_step()
+        elif self.strategy == 'threat_informed':
+            tx, ty = self._threat_wp(game_state.uav_intelligence)
+        elif self.strategy == 'target_informed':
+            tx, ty = self._target_wp(game_state)
+        elif self.strategy == 'hybrid':
+            # First 30 % of ticks: target-informed (scout ahead for UGV)
+            # Remaining: threat-informed (monitor enemies as density increases)
+            any_escape = any(a.escape_mode for a in game_state.agents if a.active)
+            if any_escape or (self._tick % 150) > 45:
+                tx, ty = self._threat_wp(game_state.uav_intelligence)
+            else:
+                tx, ty = self._target_wp(game_state)
+        else:
+            tx, ty = (0.0, 0.0)
+
+        # Move toward waypoint
+        dx, dy = tx - self.x, ty - self.y
+        dist   = math.hypot(dx, dy)
+        if dist > 0.5:
+            move       = min(self.SPEED * delta_t, dist)
+            self.x    += (dx / dist) * move
+            self.y    += (dy / dist) * move
+            self.heading = math.degrees(math.atan2(dy, dx))
+
+        # Detect enemies within detection radius (centered coords)
+        detections: dict = {}
+        for e in game_state.enemies:
+            if math.hypot(e.x - self.x, e.y - self.y) <= self.detect_r:
+                detections[e.id] = (e.x, e.y, self._tick)
+
+        return detections
+
+
+# ---------------------------------------------------------------------------
 #  GAME STATE
 # ---------------------------------------------------------------------------
 
@@ -508,6 +624,11 @@ class SARGameState:
         self.waypoint_mode: bool  = False
         self.waypoint_loop: bool  = False
         self._waypoint_index: int = 0  # which waypoint agents are heading to
+        # UAV cooperative layer
+        self.uav_agent: UAVAgent | None = None
+        self.uav_strategy: str = 'none'
+        self.uav_intelligence: dict = {}  # {enemy_id: (ex_c, ey_c, tick_seen)}
+        self.current_tick: int = 0        # simulation tick counter
 
     # ------------------------------------------------------------------
     @property
@@ -529,7 +650,8 @@ class SARGameState:
     def spawn_objects(self, G, cx, cy, n_patrol=3, n_aggressive=2, n_targets=5,
                       patrol_speed=2.5, aggr_speed=4.5, n_agents=1,
                       agent_speed=6.0, detection_radius=50.0,
-                      custom_placements=None, agent_lat=None, agent_lon=None):
+                      custom_placements=None, agent_lat=None, agent_lon=None,
+                      uav_strategy='none', mission_radius=1000):
         """Spawn all entities. custom_placements overrides random when mode=custom."""
         self.enemies.clear()
         self.targets.clear()
@@ -543,6 +665,14 @@ class SARGameState:
         self.dead_ends            = compute_dead_ends(G)
         self.last_telemetry_time  = 0.0
         self.robot_speed_ms       = agent_speed
+        self.uav_intelligence     = {}
+        self.current_tick         = 0
+        self.uav_strategy         = uav_strategy
+        if uav_strategy != 'none':
+            self.uav_agent = UAVAgent(uav_strategy, mission_radius)
+            print(f"{C.OSM}[UAV] Strategy: {uav_strategy} | R_detect={UAVAgent.DETECT_R}m{C.END}")
+        else:
+            self.uav_agent = None
 
         all_nodes = list(G.nodes())
 
@@ -883,7 +1013,9 @@ class SARGameState:
                     visible_enemy_ids.add(e.id)
         known_enemies = [e for e in self.enemies if e.id in visible_enemy_ids]
         
-        penalized_G = build_penalized_graph(G, known_enemies, geofence=self.geofence_poly, cx=cx, cy=cy)
+        penalized_G = build_penalized_graph(
+            G, known_enemies, geofence=self.geofence_poly, cx=cx, cy=cy,
+            uav_threats=self.uav_intelligence, current_tick=self.current_tick)
         threatening  = [e for e in known_enemies if e.base_type == 'aggressive' and e.type == 'aggressive']
         blocking     = [e for e in known_enemies if e.base_type == 'patrol']
 
@@ -1012,6 +1144,18 @@ class SARGameState:
             return
 
         self.mission_elapsed += delta_t
+        self.current_tick    += 1
+
+        # UAV: move and harvest detections into intelligence dict
+        if self.uav_agent is not None:
+            new_detections = self.uav_agent.update(self, delta_t)
+            self.uav_intelligence.update(new_detections)
+            # Prune entries older than 3*tau ticks (< 5% decay strength)
+            stale_cutoff = self.current_tick - 90
+            self.uav_intelligence = {
+                eid: v for eid, v in self.uav_intelligence.items()
+                if v[2] > stale_cutoff
+            }
 
         # Per-agent terrain, target collection, path pruning, replan
         for ag in self.agents:
@@ -1406,7 +1550,8 @@ def fetch_vector_map(lat: float = 38.900, lon: float = 22.433, radius: int = 150
                      patrol_speed: float = 2.5, aggr_speed: float = 4.5,
                      agent_speed: float = 6.0, n_agents: int = 1,
                      detection_radius: float = 50.0, mode: str = 'random',
-                     agent_lat: float = None, agent_lon: float = None):
+                     agent_lat: float = None, agent_lon: float = None,
+                     uav_strategy: str = 'none'):
     try:
         print(f"\n{C.OSM}[OSM] Map Request: lat={lat}, lon={lon}, radius={radius}, "
               f"agents={n_agents}, mode={mode}{C.END}")
@@ -1600,7 +1745,8 @@ def fetch_vector_map(lat: float = 38.900, lon: float = 22.433, radius: int = 150
             G_proj, center_x, center_y,
             n_patrol, n_aggr, n_targets,
             patrol_speed, aggr_speed, n_agents, agent_speed,
-            detection_radius, placements, agent_lat, agent_lon)
+            detection_radius, placements, agent_lat, agent_lon,
+            uav_strategy=uav_strategy, mission_radius=radius)
 
         roads_data = []
         for u, v, data in G_proj.edges(data=True):
@@ -2016,6 +2162,49 @@ def set_sim_speed(req: SpeedRequest):
 def get_sim_speed():
     return {"multiplier": sim_speed_multiplier}
 
+
+@app.get("/api/sim/uav")
+def get_uav_state():
+    """Returns UAV position, heading, detection radius, strategy, and intelligence summary."""
+    uav = game_logic.uav_agent
+    if uav is None:
+        return {"active": False, "strategy": "none"}
+    tf = current_map_data.get("transformer")
+    lat, lon = None, None
+    if tf:
+        try:
+            cx = current_map_data.get("center_x", 0.0)
+            cy = current_map_data.get("center_y", 0.0)
+            lon, lat = tf.transform(uav.x + cx, uav.y + cy)
+        except Exception:
+            pass
+    intel_summary = []
+    for eid, v in game_logic.uav_intelligence.items():
+        item = {"enemy_id": eid, "x": round(v[0], 1), "y": round(v[1], 1),
+                "ticks_ago": game_logic.current_tick - v[2],
+                "lat": None, "lon": None}
+        if tf:
+            try:
+                cx = current_map_data.get("center_x", 0.0)
+                cy = current_map_data.get("center_y", 0.0)
+                i_lon, i_lat = tf.transform(v[0] + cx, v[1] + cy)
+                item["lat"] = round(i_lat, 6)
+                item["lon"] = round(i_lon, 6)
+            except Exception:
+                pass
+        intel_summary.append(item)
+    return {
+        "active":    True,
+        "strategy":  uav.strategy,
+        "x":         round(uav.x, 1),
+        "y":         round(uav.y, 1),
+        "lat":       round(lat, 6) if lat else None,
+        "lon":       round(lon, 6) if lon else None,
+        "heading":   round(uav.heading, 1),
+        "detect_r":  uav.detect_r,
+        "tick":      uav._tick,
+        "intel":     intel_summary,
+    }
 
 
 @app.get("/api/stats")
